@@ -74,7 +74,7 @@ struct GapNode {
         }
     }
 
-    // [Fix C] std::move 후 size() 호출 방지
+    // [Fix] std::move 후 size() 호출 방지
     void expand_buffer(size_t needed) {
         size_t old_cap = buf.size();
         size_t new_cap = old_cap * 2 + needed;
@@ -154,7 +154,6 @@ public:
         Node* target = find_node(pos, node_offset, update, rank);
 
         if (!target) {
-            // Case 1: Empty List (Initial Insert)
             if (total_size == 0) {
                 target = new Node(random_level());
                 auto& gap = std::get<GapNode>(target->data);
@@ -169,27 +168,22 @@ public:
                  throw std::runtime_error("Unexpected null target on non-empty list");
             }
         } else {
-            // Case 2: Insert into existing node
             if (std::holds_alternative<CompactNode>(target->data)) {
                 target->data = expand(std::get<CompactNode>(target->data));
             }
             
-            // [Fix A 효과] find_node에서 이미 offset 보정이 되었으므로 안전하게 삽입
             std::get<GapNode>(target->data).insert(node_offset, s);
 
-            // [Fix B] Insert 시 Span 업데이트 로직 (수학적 정확성 확보)
+            // [Corrected] Insert 시 Span 업데이트 로직
+            // target으로 들어오는 모든 링크(update[i])의 span을 증가시켜야 함.
             for (int i = 0; i < MAX_LEVEL; ++i) {
-                if (update[i]->next[i] == target) {
-                    // Predecessor -> Target: Target 내부가 커졌으므로, Target -> Next 거리가 멂.
-                    target->span[i] += s.size();
-                } else {
-                    // Predecessor -> (Jump) -> Next: 점프 구간 내에서 Target이 커짐.
+                if (update[i]) {
                     update[i]->span[i] += s.size();
                 }
             }
 
             if (target->content_size() > NODE_MAX_SIZE) {
-                split_node(target);
+                split_node(target, update);
             }
         }
         total_size += s.size();
@@ -203,18 +197,13 @@ public:
         
         Node* target = find_node(pos, node_offset, update, rank);
         
-        // [Fix A 효과] find_node가 보정한 target을 사용하므로 안전함
         if (!target) throw std::runtime_error("Node structure corruption");
         return std::visit([&](auto const& n) { return n.at(node_offset); }, target->data);
     }
 
     std::string to_string() const {
         std::string res;
-        Node* x = head->next[0];
-        while (x) {
-            res += std::visit([](auto const& n) { return n.to_string(); }, x->data);
-            x = x->next[0];
-        }
+        for(auto c : *this) res += c; // Iterator 사용
         return res;
     }
 
@@ -230,29 +219,24 @@ public:
     
     size_t size() const { return total_size; }
 
+    // --- Iterator 구현 (Public) ---
     class Iterator {
         const Node* curr_node;
         size_t offset;
-        
     public:
         Iterator(const Node* node, size_t off) : curr_node(node), offset(off) {}
 
-        // 역참조: 현재 위치의 문자 반환
         char operator*() const {
             if (!curr_node) return '\0';
             return std::visit([this](auto const& n) { return n.at(offset); }, curr_node->data);
         }
 
-        // 전위 증가 (++it): 다음 문자로 이동 O(1)
         Iterator& operator++() {
             if (!curr_node) return *this;
-
             size_t len = curr_node->content_size();
             offset++;
-
-            // 현재 노드의 끝에 도달하면 다음 노드로 이동
             if (offset >= len) {
-                curr_node = curr_node->next[0]; // Level 0 링크 타고 이동
+                curr_node = curr_node->next[0];
                 offset = 0;
             }
             return *this;
@@ -263,20 +247,13 @@ public:
         }
     };
 
-    Iterator begin() const {
-        // head는 더미이므로 head->next[0]부터 시작
-        return Iterator(head->next[0], 0);
-    }
-
-    Iterator end() const {
-        return Iterator(nullptr, 0);
-    }
+    Iterator begin() const { return Iterator(head->next[0], 0); }
+    Iterator end() const { return Iterator(nullptr, 0); }
 
 private:
     static constexpr int MAX_LEVEL = 16;
-    static constexpr size_t NODE_MAX_SIZE =  1999; 
-    // 현재 코드는 2000 이상으로 하면 오류 남
-
+    static constexpr size_t NODE_MAX_SIZE = 4096; // [Tuned] 성능 최적화
+    
     Node* head;
     size_t total_size;
     std::mt19937 gen;
@@ -288,7 +265,7 @@ private:
         return lvl;
     }
 
-    // [Fix A: 핵심 수정] 경계값 보정 로직 추가 (Normalization)
+    // [Corrected] find_node 경계 보정 (Normalization)
     Node* find_node(size_t pos, size_t& node_offset,
                     std::array<Node*, MAX_LEVEL>& update,
                     std::array<size_t, MAX_LEVEL>& rank) const 
@@ -312,14 +289,9 @@ private:
         if (target) {
             node_offset = pos - accumulated;
             
-            // [User's Fix] 만약 offset이 노드 크기와 같다면(Append 위치), 
-            // 다음 노드의 0번 인덱스로 넘겨주는 것이 안전함. (Split 경계 등)
-            // 이를 통해 at() 호출 시 OOB를 방지하고, insert 시에도 다음 노드 앞 삽입으로 유도.
+            // 경계 보정: offset이 size를 넘어가면 다음 노드로 이동
             while (target && node_offset >= target->content_size()) {
-                // 단, 마지막 노드의 끝인 경우(Append)는 제외해야 함.
-                // target->next[0]이 없으면 루프 종료 (현재 노드 끝에 Append)
-                if (!target->next[0]) break;
-
+                if (!target->next[0]) break; // Append 위치면 중단
                 accumulated += target->content_size();
                 target = target->next[0];
                 node_offset = pos - accumulated;
@@ -328,51 +300,48 @@ private:
         return target;
     }
 
-    // [Fix B: 구조 무결성] Split 시 Span 재계산 로직
-    void split_node(Node* u) {
+    // [Corrected] Split 시 Predecessor의 Span 갱신 로직 복구
+    void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
         auto& u_gap = std::get<GapNode>(u->data);
         std::string full_str = u_gap.to_string(); 
         
         size_t split_point = full_str.size() / 2;
         std::string s1 = full_str.substr(0, split_point);
         std::string s2 = full_str.substr(split_point);
-        size_t s1_size = s1.size();
+        size_t v_size = s2.size();
 
-        // 1. U 리셋 (앞부분)
         u_gap = GapNode(128); 
         u_gap.insert(0, s1);
 
-        // 2. V 생성 (뒷부분)
         int u_levels = u->next.size();
         int new_level = random_level();
-        if (new_level > u_levels) new_level = u_levels; // 안전장치
+        if (new_level > u_levels) new_level = u_levels; 
 
         Node* v = new Node(new_level);
         auto& v_gap = std::get<GapNode>(v->data);
         v_gap.insert(0, s2);
 
-        // 3. 토폴로지 및 Span 갱신
-        for (int i = 0; i < new_level; ++i) {
-            // 연결 변경: U -> Next  ==>  U -> V -> Next
-            v->next[i] = u->next[i];
-            u->next[i] = v;
+        for (int i = 0; i < MAX_LEVEL; ++i) {
+            // update[i]는 u의 predecessor임이 보장됨 (find_node 결과)
+            // 단, update[i] -> next[i] 가 u여야 함.
+            if (!update[i] || update[i]->next[i] != u) continue;
             
-            // Span 분할:
-            // Old: U -> (dist) -> Next
-            // New: U -> (s1) -> V -> (dist - s1) -> Next
-            
-            // 기존 U->span[i]는 (S1 + S2 + dist_to_next) 값이었음.
-            size_t old_dist = u->span[i];
-            
-            // U -> V 구간의 거리는 U의 새로운 크기 (S1)
-            u->span[i] = s1_size;
-            
-            // V -> Next 구간의 거리는 나머지 (Old - S1)
-            v->span[i] = old_dist - s1_size;
+            // 1. Predecessor -> U 거리 보정
+            // Insert에서 이미 전체 크기만큼 늘려놨으므로, V만큼 줄여야 U까지 거리가 맞음
+            update[i]->span[i] -= v_size;
+
+            if (i < new_level) {
+                // Case A: U -> V -> Next
+                v->next[i] = u->next[i];
+                u->next[i] = v;
+                
+                v->span[i] = u->span[i]; // U->Next 거리 계승
+                u->span[i] = v_size;     // U->V 거리는 V 크기
+            } else {
+                // Case B: U -> Next (V 건너뜀)
+                // U가 작아졌으므로, U -> Next 거리는 V만큼 늘어남 (V를 포함해야 하므로)
+                u->span[i] += v_size;
+            }
         }
-        
-        // V가 존재하지 않는 상위 레벨 (i >= new_level)
-        // U -> Next 연결은 유지됨.
-        // U->span[i] 값도 (S1 + S2 + dist) 그대로 유지되어야 함. (변경 없음)
     }
 };
