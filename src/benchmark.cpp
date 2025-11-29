@@ -27,8 +27,8 @@ public:
 };
 
 // --- 테스트 파라미터 ---
-const int INITIAL_SIZE = 400000;   // 초기 텍스트 크기
-const int INSERT_COUNT = 40000;    // 중간 삽입 횟수 (Typing Simulation)
+const int INITIAL_SIZE = 1000000;   // 초기 텍스트 크기
+const int INSERT_COUNT = 100000;    // 중간 삽입 횟수 (Typing Simulation)
 const string CHUNK = "A";         // 한 번에 타이핑하는 문자열
 
 // 1. std::vector 벤치마크
@@ -136,8 +136,8 @@ void bench_bimodal() {
 // [새로운 벤치마크] 랜덤 인덱스 삽입 (진짜 성능 비교)
 void bench_random_access_insertion() {
     // 테스트 크기 조정 (List가 너무 느려서 100만 개는 불가능할 수 있음)
-    const int TEST_SIZE = 40000; 
-    const int RAND_INSERTS = 4000;
+    const int TEST_SIZE = 100000; 
+    const int RAND_INSERTS = 10000;
     
     std::cout << "\n[Scenario: Random Index Insertion (N=" << TEST_SIZE 
               << ", Inserts=" << RAND_INSERTS << ")]\n";

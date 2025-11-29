@@ -69,9 +69,14 @@ struct GapNode {
         if (gap_end - gap_start < s.size()) {
             expand_buffer(s.size());
         }
+        /*
         for (char c : s) {
             buf[gap_start++] = c;
         }
+        */
+        // for loop -> std::copy optimization
+        std::copy(s.begin(), s.end(), buf.begin() + gap_start);
+        gap_start += s.size();
     }
 
     void expand_buffer(size_t needed) {
@@ -263,11 +268,29 @@ public:
         return std::visit([&](auto const& n) { return n.at(node_offset); }, target->data);
     }
 
-    // 이제 begin/end가 먼저 정의되었으므로 에러가 나지 않습니다.
+    // Iterator를 타지 않고, 노드 내부 버퍼를 통째로 append 하여 대역폭 활용 극대화
     std::string to_string() const {
         std::string res;
         res.reserve(total_size);
-        for(auto c : *this) res += c; 
+        Node* curr = head->next[0]; // Level 0 순회
+        while (curr) {
+            std::visit([&](auto const& n) {
+                // 노드 타입에 따라 최적화된 블록 복사 수행
+                using T = std::decay_t<decltype(n)>;
+                if constexpr (std::is_same_v<T, CompactNode>) {
+                    // CompactNode: 한 방에 복사
+                    res.append(n.buf.data(), n.buf.size());
+                } else {
+                    // GapNode: Gap을 건너뛰고 두 덩어리로 복사
+                    // Part 1: Gap 앞
+                    res.append(n.buf.data(), n.gap_start);
+                    // Part 2: Gap 뒤
+                    size_t back_len = n.buf.size() - n.gap_end;
+                    res.append(n.buf.data() + n.gap_end, back_len);
+                }
+            }, curr->data);
+            curr = curr->next[0];
+        }
         return res;
     }
 
