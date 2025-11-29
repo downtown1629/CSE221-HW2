@@ -97,15 +97,14 @@ void bench_bimodal() {
     // 강제로 Compact 모드로 시작 (공정한 비교를 위해)
     bmt.optimize(); 
 
-    Timer t;
+
     long long checksum = 0;
 
     // A. Typing Phase
     // Skip List 탐색(O(log N)) + Gap Buffer 삽입(O(1))
+    Timer t;
     size_t mid = bmt.size() / 2;
-    t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
-        // 매번 인덱스로 접근해도 O(log N)으로 빠름
         bmt.insert(mid + i, "A"); 
     }
     double time_insert = t.elapsed_ms();
@@ -117,13 +116,14 @@ void bench_bimodal() {
 
     // B. Reading Phase
     t.reset();
+    long long checksum = 0;
+
     // at()을 이용한 순회는 O(N log N)이라 느릴 수 있음.
     // 하지만 내부 노드가 CompactNode라면 데이터 지역성이 좋음.
     // *실제 구현에서는 Iterator가 있어야 O(N)이지만, 여기서는 at()으로 측정
     // (만약 너무 느리면 iterator 구현이 필요하지만, 과제 범위상 at() 성능 비교로 충분)
-    size_t sz = bmt.size();
-    for (size_t i = 0; i < sz; ++i) {
-        checksum += bmt.at(i);
+    for (auto it = bmt.begin(); it != bmt.end(); ++it) {
+        checksum += *it;
     }
     double time_read = t.elapsed_ms();
 

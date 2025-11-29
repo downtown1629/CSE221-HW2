@@ -230,9 +230,51 @@ public:
     
     size_t size() const { return total_size; }
 
+    class Iterator {
+        const Node* curr_node;
+        size_t offset;
+        
+    public:
+        Iterator(const Node* node, size_t off) : curr_node(node), offset(off) {}
+
+        // 역참조: 현재 위치의 문자 반환
+        char operator*() const {
+            if (!curr_node) return '\0';
+            return std::visit([this](auto const& n) { return n.at(offset); }, curr_node->data);
+        }
+
+        // 전위 증가 (++it): 다음 문자로 이동 O(1)
+        Iterator& operator++() {
+            if (!curr_node) return *this;
+
+            size_t len = curr_node->content_size();
+            offset++;
+
+            // 현재 노드의 끝에 도달하면 다음 노드로 이동
+            if (offset >= len) {
+                curr_node = curr_node->next[0]; // Level 0 링크 타고 이동
+                offset = 0;
+            }
+            return *this;
+        }
+
+        bool operator!=(const Iterator& other) const {
+            return curr_node != other.curr_node || offset != other.offset;
+        }
+    };
+
+    Iterator begin() const {
+        // head는 더미이므로 head->next[0]부터 시작
+        return Iterator(head->next[0], 0);
+    }
+
+    Iterator end() const {
+        return Iterator(nullptr, 0);
+    }
+
 private:
     static constexpr int MAX_LEVEL = 16;
-    static constexpr size_t NODE_MAX_SIZE = 10; 
+    static constexpr size_t NODE_MAX_SIZE = 1024; 
     
     Node* head;
     size_t total_size;
