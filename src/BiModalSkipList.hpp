@@ -274,8 +274,9 @@ public:
 
 private:
     static constexpr int MAX_LEVEL = 16;
-    static constexpr size_t NODE_MAX_SIZE = 1024; 
-    
+    static constexpr size_t NODE_MAX_SIZE =  1999; 
+    // 현재 코드는 2000 이상으로 하면 오류 남
+
     Node* head;
     size_t total_size;
     std::mt19937 gen;

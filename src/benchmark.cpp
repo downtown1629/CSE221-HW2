@@ -98,8 +98,6 @@ void bench_bimodal() {
     bmt.optimize(); 
 
 
-    long long checksum = 0;
-
     // A. Typing Phase
     // Skip List 탐색(O(log N)) + Gap Buffer 삽입(O(1))
     Timer t;
