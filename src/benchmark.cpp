@@ -27,8 +27,8 @@ public:
 };
 
 // --- 테스트 파라미터 ---
-const int INITIAL_SIZE = 50000;   // 초기 텍스트 크기
-const int INSERT_COUNT = 5000;    // 중간 삽입 횟수 (Typing Simulation)
+const int INITIAL_SIZE = 400000;   // 초기 텍스트 크기
+const int INSERT_COUNT = 40000;    // 중간 삽입 횟수 (Typing Simulation)
 const string CHUNK = "A";         // 한 번에 타이핑하는 문자열
 
 // 1. std::vector 벤치마크
@@ -133,6 +133,82 @@ void bench_bimodal() {
     cout << "   * Optimization Overhead: " << time_opt << " ms" << endl;
 }
 
+// [새로운 벤치마크] 랜덤 인덱스 삽입 (진짜 성능 비교)
+void bench_random_access_insertion() {
+    // 테스트 크기 조정 (List가 너무 느려서 100만 개는 불가능할 수 있음)
+    const int TEST_SIZE = 40000; 
+    const int RAND_INSERTS = 4000;
+    
+    std::cout << "\n[Scenario: Random Index Insertion (N=" << TEST_SIZE 
+              << ", Inserts=" << RAND_INSERTS << ")]\n";
+    std::cout << "--------------------------------------------------------------\n";
+    std::cout << std::left << std::setw(15) << "Structure" 
+              << std::setw(15) << "Time (ms)" 
+              << "Note" << std::endl;
+    std::cout << "--------------------------------------------------------------\n";
+
+    // 랜덤 엔진
+    std::mt19937 gen(1234); // 고정 시드
+
+    // 1. std::vector
+    {
+        std::vector<char> v(TEST_SIZE, 'x');
+        std::uniform_int_distribution<> dist(0, TEST_SIZE);
+        
+        Timer t;
+        for (int i = 0; i < RAND_INSERTS; ++i) {
+            size_t pos = dist(gen) % v.size();
+            // 위치 계산은 O(1)이지만, 데이터 이동이 O(N)
+            v.insert(v.begin() + pos, 'A'); 
+        }
+        std::cout << std::left << std::setw(15) << "std::vector" 
+                  << std::setw(15) << t.elapsed_ms() 
+                  << "(Fast Seek, Slow Shift)" << std::endl;
+    }
+
+    // 2. std::list
+    {
+        std::list<char> l(TEST_SIZE, 'x');
+        std::uniform_int_distribution<> dist(0, TEST_SIZE);
+
+        Timer t;
+        for (int i = 0; i < RAND_INSERTS; ++i) {
+            size_t pos = dist(gen) % l.size();
+            
+            // [핵심] 리스트는 인덱스로 바로 못 감 -> 처음부터 걸어가야 함 O(N)
+            auto it = l.begin();
+            std::advance(it, pos); 
+            
+            // 삽입 자체는 O(1)
+            l.insert(it, 'A');
+        }
+        std::cout << std::left << std::setw(15) << "std::list" 
+                  << std::setw(15) << t.elapsed_ms() 
+                  << "(Slow Seek, Fast Insert)" << std::endl;
+    }
+
+    // 3. BiModalText
+    {
+        BiModalText bmt;
+        std::string chunk(100, 'x');
+        for(int i=0; i<TEST_SIZE/100; ++i) bmt.insert(0, chunk);
+        bmt.optimize(); // 공정한 비교를 위해 정리 후 시작
+
+        std::uniform_int_distribution<> dist(0, TEST_SIZE);
+
+        Timer t;
+        for (int i = 0; i < RAND_INSERTS; ++i) {
+            size_t pos = dist(gen) % bmt.size();
+            // 검색 O(log N) + 삽입 O(1)
+            bmt.insert(pos, "A"); 
+        }
+        std::cout << std::left << std::setw(15) << "BiModalText" 
+                  << std::setw(15) << t.elapsed_ms() 
+                  << "(Log Seek, Fast Insert)" << std::endl;
+    }
+    std::cout << "--------------------------------------------------------------\n";
+}
+
 int main() {
     cout << "==============================================================" << endl;
     cout << " Benchmark: N=" << INITIAL_SIZE << ", Inserts=" << INSERT_COUNT << endl;
@@ -146,6 +222,7 @@ int main() {
     bench_vector();
     bench_list();
     bench_bimodal();
+    bench_random_access_insertion();
 
     cout << "==============================================================" << endl;
     return 0;

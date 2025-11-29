@@ -74,7 +74,6 @@ struct GapNode {
         }
     }
 
-    // [Fix] std::move 후 size() 호출 방지
     void expand_buffer(size_t needed) {
         size_t old_cap = buf.size();
         size_t new_cap = old_cap * 2 + needed;
@@ -144,6 +143,71 @@ public:
         }
     }
 
+    // --- [Move Up] Iterator Definition & Smart Caching ---
+    class Iterator {
+        const Node* curr_node;
+        size_t offset;
+        
+        // 캐싱 변수 (읽기 최적화용)
+        const char* cached_ptr;
+        bool is_compact;
+
+        void update_cache() {
+            if (!curr_node) {
+                cached_ptr = nullptr;
+                is_compact = false;
+                return;
+            }
+            if (std::holds_alternative<CompactNode>(curr_node->data)) {
+                is_compact = true;
+                const auto& c_node = std::get<CompactNode>(curr_node->data);
+                cached_ptr = c_node.buf.data();
+            } else {
+                is_compact = false;
+                cached_ptr = nullptr;
+            }
+        }
+
+    public:
+        Iterator(const Node* node, size_t off) : curr_node(node), offset(off) {
+            update_cache();
+        }
+
+        char operator*() const {
+            if (!curr_node) return '\0';
+            // Compact 모드면 포인터 직접 접근 (Fast Path)
+            if (is_compact) return cached_ptr[offset];
+            // Gap 모드면 기존 방식 (Slow Path)
+            return std::visit([this](auto const& n) { return n.at(offset); }, curr_node->data);
+        }
+
+        Iterator& operator++() {
+            if (!curr_node) return *this;
+            
+            // 크기 확인 시에도 최적화
+            size_t len = is_compact ? 
+                         std::get<CompactNode>(curr_node->data).buf.size() : 
+                         std::visit([](auto const& n) { return n.size(); }, curr_node->data);
+
+            offset++;
+            if (offset >= len) {
+                curr_node = curr_node->next[0];
+                offset = 0;
+                update_cache(); // 노드 변경 시 캐시 갱신
+            }
+            return *this;
+        }
+
+        bool operator!=(const Iterator& other) const {
+            return curr_node != other.curr_node || offset != other.offset;
+        }
+    };
+
+    Iterator begin() const { return Iterator(head->next[0], 0); }
+    Iterator end() const { return Iterator(nullptr, 0); }
+
+    // --- Main Operations ---
+
     void insert(size_t pos, std::string_view s) {
         if (pos > total_size) throw std::out_of_range("Pos out of range");
 
@@ -174,8 +238,6 @@ public:
             
             std::get<GapNode>(target->data).insert(node_offset, s);
 
-            // [Corrected] Insert 시 Span 업데이트 로직
-            // target으로 들어오는 모든 링크(update[i])의 span을 증가시켜야 함.
             for (int i = 0; i < MAX_LEVEL; ++i) {
                 if (update[i]) {
                     update[i]->span[i] += s.size();
@@ -201,9 +263,11 @@ public:
         return std::visit([&](auto const& n) { return n.at(node_offset); }, target->data);
     }
 
+    // 이제 begin/end가 먼저 정의되었으므로 에러가 나지 않습니다.
     std::string to_string() const {
         std::string res;
-        for(auto c : *this) res += c; // Iterator 사용
+        res.reserve(total_size);
+        for(auto c : *this) res += c; 
         return res;
     }
 
@@ -219,40 +283,9 @@ public:
     
     size_t size() const { return total_size; }
 
-    // --- Iterator 구현 (Public) ---
-    class Iterator {
-        const Node* curr_node;
-        size_t offset;
-    public:
-        Iterator(const Node* node, size_t off) : curr_node(node), offset(off) {}
-
-        char operator*() const {
-            if (!curr_node) return '\0';
-            return std::visit([this](auto const& n) { return n.at(offset); }, curr_node->data);
-        }
-
-        Iterator& operator++() {
-            if (!curr_node) return *this;
-            size_t len = curr_node->content_size();
-            offset++;
-            if (offset >= len) {
-                curr_node = curr_node->next[0];
-                offset = 0;
-            }
-            return *this;
-        }
-
-        bool operator!=(const Iterator& other) const {
-            return curr_node != other.curr_node || offset != other.offset;
-        }
-    };
-
-    Iterator begin() const { return Iterator(head->next[0], 0); }
-    Iterator end() const { return Iterator(nullptr, 0); }
-
 private:
     static constexpr int MAX_LEVEL = 16;
-    static constexpr size_t NODE_MAX_SIZE = 4096; // [Tuned] 성능 최적화
+    static constexpr size_t NODE_MAX_SIZE = 4096; 
     
     Node* head;
     size_t total_size;
@@ -265,7 +298,6 @@ private:
         return lvl;
     }
 
-    // [Corrected] find_node 경계 보정 (Normalization)
     Node* find_node(size_t pos, size_t& node_offset,
                     std::array<Node*, MAX_LEVEL>& update,
                     std::array<size_t, MAX_LEVEL>& rank) const 
@@ -288,10 +320,8 @@ private:
         
         if (target) {
             node_offset = pos - accumulated;
-            
-            // 경계 보정: offset이 size를 넘어가면 다음 노드로 이동
             while (target && node_offset >= target->content_size()) {
-                if (!target->next[0]) break; // Append 위치면 중단
+                if (!target->next[0]) break; 
                 accumulated += target->content_size();
                 target = target->next[0];
                 node_offset = pos - accumulated;
@@ -300,7 +330,6 @@ private:
         return target;
     }
 
-    // [Corrected] Split 시 Predecessor의 Span 갱신 로직 복구
     void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
         auto& u_gap = std::get<GapNode>(u->data);
         std::string full_str = u_gap.to_string(); 
@@ -322,24 +351,16 @@ private:
         v_gap.insert(0, s2);
 
         for (int i = 0; i < MAX_LEVEL; ++i) {
-            // update[i]는 u의 predecessor임이 보장됨 (find_node 결과)
-            // 단, update[i] -> next[i] 가 u여야 함.
             if (!update[i] || update[i]->next[i] != u) continue;
             
-            // 1. Predecessor -> U 거리 보정
-            // Insert에서 이미 전체 크기만큼 늘려놨으므로, V만큼 줄여야 U까지 거리가 맞음
             update[i]->span[i] -= v_size;
 
             if (i < new_level) {
-                // Case A: U -> V -> Next
                 v->next[i] = u->next[i];
                 u->next[i] = v;
-                
-                v->span[i] = u->span[i]; // U->Next 거리 계승
-                u->span[i] = v_size;     // U->V 거리는 V 크기
+                v->span[i] = u->span[i]; 
+                u->span[i] = v_size;    
             } else {
-                // Case B: U -> Next (V 건너뜀)
-                // U가 작아졌으므로, U -> Next 거리는 V만큼 늘어남 (V를 포함해야 하므로)
                 u->span[i] += v_size;
             }
         }
