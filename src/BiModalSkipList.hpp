@@ -210,7 +210,39 @@ public:
 
     Iterator begin() const { return Iterator(head->next[0], 0); }
     Iterator end() const { return Iterator(nullptr, 0); }
-
+    
+    // --- [Ultimate Read Optimization] Internal Iterator ---
+    // 람다 함수(func)를 받아서 모든 문자에 대해 실행합니다.
+    // 컴파일러가 내부 루프를 강력하게 인라인/벡터화할 수 있습니다.
+    template <typename Func>
+    void scan(Func func) const {
+        Node* curr = head->next[0];
+        while (curr) {
+            // std::visit 오버헤드를 노드당 1회로 줄임
+            std::visit([&](auto const& n) {
+                using T = std::decay_t<decltype(n)>;
+                
+                if constexpr (std::is_same_v<T, CompactNode>) {
+                    // [Fast Path] 연속된 메모리 -> 컴파일러가 SIMD 최적화하기 딱 좋음
+                    const char* data = n.buf.data();
+                    size_t sz = n.buf.size();
+                    for (size_t i = 0; i < sz; ++i) {
+                        func(data[i]);
+                    }
+                } else {
+                    // GapNode: 두 덩어리로 나눠서 처리
+                    const char* data = n.buf.data();
+                    // Part 1: Gap 앞
+                    for (size_t i = 0; i < n.gap_start; ++i) func(data[i]);
+                    // Part 2: Gap 뒤
+                    size_t sz = n.buf.size();
+                    for (size_t i = n.gap_end; i < sz; ++i) func(data[i]);
+                }
+            }, curr->data);
+            
+            curr = curr->next[0];
+        }
+    }
     // --- Main Operations ---
 
     void insert(size_t pos, std::string_view s) {

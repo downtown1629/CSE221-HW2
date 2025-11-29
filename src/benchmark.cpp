@@ -27,8 +27,8 @@ public:
 };
 
 // --- 테스트 파라미터 ---
-const int INITIAL_SIZE = 1000000;   // 초기 텍스트 크기
-const int INSERT_COUNT = 100000;    // 중간 삽입 횟수 (Typing Simulation)
+const int INITIAL_SIZE = 3000000;   // 초기 텍스트 크기
+const int INSERT_COUNT = 300000;    // 중간 삽입 횟수 (Typing Simulation)
 const string CHUNK = "A";         // 한 번에 타이핑하는 문자열
 
 // 1. std::vector 벤치마크
@@ -120,9 +120,16 @@ void bench_bimodal() {
     // 하지만 내부 노드가 CompactNode라면 데이터 지역성이 좋음.
     // *실제 구현에서는 Iterator가 있어야 O(N)이지만, 여기서는 at()으로 측정
     // (만약 너무 느리면 iterator 구현이 필요하지만, 과제 범위상 at() 성능 비교로 충분)
-    for (auto it = bmt.begin(); it != bmt.end(); ++it) {
-        checksum += *it;
-    }
+    // [기존 Iterator 방식]
+    // for (auto it = bmt.begin(); it != bmt.end(); ++it) {
+    //    checksum += *it;
+    // }
+
+    // [New: Scan 방식]
+    // 람다 함수가 인라인화되면서 극한의 속도를 냅니다.
+    bmt.scan([&](char c) {
+        checksum += c;
+    });
     double time_read = t.elapsed_ms();
 
     cout << left << setw(15) << "BiModalText" 
