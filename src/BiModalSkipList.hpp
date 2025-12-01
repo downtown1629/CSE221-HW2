@@ -137,35 +137,45 @@ struct GapNode {
 
     // [최적화] 노드 분할을 위한 Suffix 추출 (string 변환 제거)
     // 현재 노드에서 뒷부분(suffix_len 만큼)을 잘라내어 새 GapNode로 반환
+// [수정된 버전] GapNode::split_right
+    // 불필요한 메모리 낭비를 줄여 Read 속도를 회복합니다.
     GapNode split_right(size_t suffix_len) {
-        size_t total_len = size();
-        size_t split_idx = total_len - suffix_len; // 분할 지점
+        size_t total_len = size(); // 현재 데이터 크기
+        size_t split_idx = total_len - suffix_len; // 분할 기준점 (prefix 길이)
 
-        // 1. Gap을 분할 지점으로 이동
+        // 1. Gap을 분할 지점으로 이동 (데이터 정렬)
         move_gap(split_idx);
         
-        // 이제 구조는: [Prefix Data] [GAP] [Suffix Data]
-        // Suffix Data는 buf[gap_end] 부터 끝까지임.
-
-        // 2. 새 노드 생성 및 데이터 이동
+        // --- Right Node (새 노드) 생성 ---
+        // 뒷부분 데이터를 가져갑니다.
         GapNode new_node(suffix_len + DEFAULT_GAP_SIZE);
-        
-        // Suffix 데이터를 새 노드의 앞부분으로 복사
-        auto suffix_start_it = buf.begin() + gap_end;
-        std::copy(suffix_start_it, buf.end(), new_node.buf.begin());
-        
-        // 새 노드 설정: 데이터는 앞에 몰려있고, Gap은 그 뒤에 존재
+        std::copy(buf.begin() + gap_end, buf.end(), new_node.buf.begin());
         new_node.gap_start = suffix_len;
-        new_node.gap_end = new_node.buf.size(); // Gap이 끝까지 차지
+        new_node.gap_end = new_node.buf.size();
 
-        // 3. 현재 노드(Prefix) 정리
-        // 뒷부분 데이터를 삭제하는 것과 같음 -> Gap을 버퍼 끝까지 확장해버림
-        // 물리적 메모리를 줄이진 않고(shrink_to_fit X), 논리적으로만 끊음
-        gap_end = buf.size(); 
+        // --- Left Node (현재 노드) 최적화 [중요!] ---
+        // 기존: gap_end = buf.size(); (용량은 그대로 둠 -> 메모리 낭비)
+        // 수정: 딱 맞는 크기의 새 버퍼로 교체합니다.
+        
+        size_t prefix_len = split_idx;
+        // Prefix용 새 버퍼 크기: 데이터 길이 + 기본 Gap (편집 여유분)
+        // 만약 Read 위주라면 DEFAULT_GAP_SIZE를 더 작게 잡아도 됩니다.
+        size_t new_capacity = prefix_len + DEFAULT_GAP_SIZE;
+        
+        std::vector<char> new_buf(new_capacity);
+        
+        // 현재 노드의 앞부분 데이터(prefix)만 복사
+        std::copy(buf.begin(), buf.begin() + gap_start, new_buf.begin());
+        
+        // 버퍼 교체 (Swap)
+        buf = std::move(new_buf);
+        
+        // Gap 재설정
+        gap_start = prefix_len;
+        gap_end = buf.size(); // 끝까지 Gap
 
         return new_node;
     }
-
     // 디버깅용
     std::string to_string() const {
         std::string res;
