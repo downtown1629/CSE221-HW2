@@ -9,11 +9,21 @@
 #include <array>
 #include <memory>
 
+constexpr size_t DEFAULT_GAP_SIZE = 128;
+
+
+
 // --- 1. Compact Node ---
 struct CompactNode {
     std::vector<char> buf;
+    
+    // 생성자
+    CompactNode() = default;
+    CompactNode(std::vector<char>&& data) : buf(std::move(data)) {}
+
     size_t size() const { return buf.size(); }
     char at(size_t i) const { return buf[i]; }
+    
     std::string to_string() const {
         return std::string(buf.begin(), buf.end());
     }
@@ -21,33 +31,44 @@ struct CompactNode {
 
 // --- 2. Gap Node ---
 struct GapNode {
+    // 런타임 상수 (필요에 따라 클래스 외부로 빼거나 조정 가능)
+    static constexpr size_t DEFAULT_GAP_SIZE = 128;
+
     std::vector<char> buf;
     size_t gap_start;
     size_t gap_end;
 
-    GapNode(size_t capacity = 128) {
+    // 생성자: 기본 용량 할당
+    GapNode(size_t capacity = DEFAULT_GAP_SIZE) {
+        if (capacity < DEFAULT_GAP_SIZE) capacity = DEFAULT_GAP_SIZE;
         buf.resize(capacity);
         gap_start = 0;
         gap_end = capacity;
     }
 
+    // 논리적 크기 (Gap 제외)
     size_t size() const {
         return buf.size() - (gap_end - gap_start);
     }
 
+    // 논리 인덱스 -> 물리 인덱스 변환
     size_t physical_index(size_t logical_idx) const {
         if (logical_idx < gap_start) return logical_idx;
         return logical_idx + (gap_end - gap_start);
     }
 
+    // 문자 접근
     char at(size_t i) const {
         return buf[physical_index(i)];
     }
 
+    // Gap 이동 (커서 이동)
     void move_gap(size_t target_logical_idx) {
         if (target_logical_idx == gap_start) return;
 
         if (target_logical_idx > gap_start) {
+            // Gap을 오른쪽으로 이동 (데이터를 왼쪽으로 복사)
+            // [Data A][Gap][Data B] -> [Data A][Data B_part][Gap]
             size_t dist = target_logical_idx - gap_start;
             std::copy(buf.begin() + gap_end, 
                       buf.begin() + gap_end + dist, 
@@ -55,7 +76,10 @@ struct GapNode {
             gap_start += dist;
             gap_end += dist;
         } else {
+            // Gap을 왼쪽으로 이동 (데이터를 오른쪽으로 복사)
+            // [Data A][Gap] -> [Data A_part][Gap][Data A_rest]
             size_t dist = gap_start - target_logical_idx;
+            // 겹치는 영역 안전 처리를 위해 copy_backward 사용 권장
             std::copy_backward(buf.begin() + target_logical_idx, 
                                buf.begin() + gap_start, 
                                buf.begin() + gap_end);
@@ -64,60 +88,130 @@ struct GapNode {
         }
     }
 
+    // 삽입 (Insert)
     void insert(size_t pos, std::string_view s) {
         move_gap(pos);
+        
+        // 공간 부족 시 확장
         if (gap_end - gap_start < s.size()) {
             expand_buffer(s.size());
         }
-        /*
-        for (char c : s) {
-            buf[gap_start++] = c;
-        }
-        */
-        // for loop -> std::copy optimization
+
+        // 데이터 복사 (반복문 대신 copy 사용)
         std::copy(s.begin(), s.end(), buf.begin() + gap_start);
         gap_start += s.size();
     }
 
+    // 삭제 (Erase) - 핵심 기능 추가
+    void erase(size_t pos, size_t len) {
+        if (pos + len > size()) {
+             // 안전장치: 범위를 벗어나면 가능한 만큼만 삭제하거나 예외 처리
+             len = size() - pos; 
+        }
+        
+        move_gap(pos); // 삭제할 위치 바로 앞으로 Gap 이동
+        
+        // Gap의 끝부분을 늘려서 데이터를 '삼킴' (논리적 삭제)
+        // [A][Gap][B C D] -> delete 1 char (B) -> [A][Gap...][C D]
+        gap_end += len; 
+    }
+
+    // 버퍼 확장
     void expand_buffer(size_t needed) {
         size_t old_cap = buf.size();
-        size_t new_cap = old_cap * 2 + needed;
+        // 최소 2배 혹은 필요한 만큼 + 여유분
+        size_t new_cap = old_cap * 2 + needed + DEFAULT_GAP_SIZE;
         size_t back_part_size = old_cap - gap_end;
         
         std::vector<char> new_buf(new_cap);
+        
+        // Gap 앞부분 복사
         std::copy(buf.begin(), buf.begin() + gap_start, new_buf.begin());
+        
+        // Gap 뒷부분 복사 (새 버퍼의 끝쪽에 배치)
         std::copy(buf.begin() + gap_end, buf.end(), new_buf.end() - back_part_size);
         
         buf = std::move(new_buf);
         gap_end = new_cap - back_part_size; 
     }
 
+    // [최적화] 노드 분할을 위한 Suffix 추출 (string 변환 제거)
+    // 현재 노드에서 뒷부분(suffix_len 만큼)을 잘라내어 새 GapNode로 반환
+    GapNode split_right(size_t suffix_len) {
+        size_t total_len = size();
+        size_t split_idx = total_len - suffix_len; // 분할 지점
+
+        // 1. Gap을 분할 지점으로 이동
+        move_gap(split_idx);
+        
+        // 이제 구조는: [Prefix Data] [GAP] [Suffix Data]
+        // Suffix Data는 buf[gap_end] 부터 끝까지임.
+
+        // 2. 새 노드 생성 및 데이터 이동
+        GapNode new_node(suffix_len + DEFAULT_GAP_SIZE);
+        
+        // Suffix 데이터를 새 노드의 앞부분으로 복사
+        auto suffix_start_it = buf.begin() + gap_end;
+        std::copy(suffix_start_it, buf.end(), new_node.buf.begin());
+        
+        // 새 노드 설정: 데이터는 앞에 몰려있고, Gap은 그 뒤에 존재
+        new_node.gap_start = suffix_len;
+        new_node.gap_end = new_node.buf.size(); // Gap이 끝까지 차지
+
+        // 3. 현재 노드(Prefix) 정리
+        // 뒷부분 데이터를 삭제하는 것과 같음 -> Gap을 버퍼 끝까지 확장해버림
+        // 물리적 메모리를 줄이진 않고(shrink_to_fit X), 논리적으로만 끊음
+        gap_end = buf.size(); 
+
+        return new_node;
+    }
+
+    // 디버깅용
     std::string to_string() const {
         std::string res;
         res.reserve(size());
-        for(size_t i=0; i<gap_start; ++i) res += buf[i];
-        for(size_t i=gap_end; i<buf.size(); ++i) res += buf[i];
+        res.append(buf.begin(), buf.begin() + gap_start);
+        res.append(buf.begin() + gap_end, buf.end());
         return res;
     }
 };
 
 using NodeData = std::variant<GapNode, CompactNode>;
 
+
 GapNode expand(const CompactNode& c) {
-    GapNode g(c.buf.size() + 128);
+    // 기존 데이터 크기 + 여유 공간(Gap) 만큼 할당
+    GapNode g(c.buf.size() + GapNode::DEFAULT_GAP_SIZE);
+    
+    // 데이터 복사: CompactNode의 모든 데이터를 GapNode의 앞부분으로 복사
     std::copy(c.buf.begin(), c.buf.end(), g.buf.begin());
+    
+    // Gap 설정: 데이터 바로 뒤부터 끝까지를 Gap으로 설정
+    // [Data A B C][GAP . . .]
     g.gap_start = c.buf.size();
     g.gap_end = g.buf.size();
+    
     return g;
 }
 
+// 2. Compact: GapNode -> CompactNode (읽기 모드 전환)
+// 메모리 사용량을 줄이고 캐시 효율을 높이기 위해 Gap을 제거합니다.
 CompactNode compact(const GapNode& g) {
     CompactNode c;
-    c.buf.reserve(g.size());
+    c.buf.reserve(g.size()); // 정확한 데이터 크기만큼만 예약
+
+    // Gap 앞부분 복사
     c.buf.insert(c.buf.end(), g.buf.begin(), g.buf.begin() + g.gap_start);
+    
+    // Gap 뒷부분 복사
     c.buf.insert(c.buf.end(), g.buf.begin() + g.gap_end, g.buf.end());
+    
+    // (선택 사항) 메모리 꼭 맞게 줄이기
+    // c.buf.shrink_to_fit(); 
+    
     return c;
 }
+
 
 struct Node {
     NodeData data;

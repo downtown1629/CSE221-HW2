@@ -1,4 +1,3 @@
-// 위 코드가 BiModalNodes.hpp에 있다고 가정하거나, 이 파일 상단에 붙여넣으세요.
 #include "BiModalSkipList.hpp"
 
 int main() {
