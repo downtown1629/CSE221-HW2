@@ -21,13 +21,16 @@ public:
     }
 
     ~BiModalText() {
-        Node* curr = head;
-        while (curr) {
-            Node* next = curr->next[0];
-            delete curr;
-            curr = next;
-        }
+        clear();
     }
+
+    // 복사/대입 금지 (Node 구조를 복사하려면 deep copy가 필요 → 비현실적)
+    BiModalText(const BiModalText&) = delete;
+    BiModalText& operator=(const BiModalText&) = delete;
+
+    // 이동도 금지 (skiplist pointer graph 이동은 위험 부담 큼)
+    BiModalText(BiModalText&&) noexcept = delete;
+    BiModalText& operator=(BiModalText&&) noexcept = delete;
 
     // --- [Move Up] Iterator Definition & Smart Caching ---
     class Iterator {
@@ -317,4 +320,15 @@ private:
         }
     }
 
+    
+    void clear() {
+        Node* curr = head;
+        while (curr) {
+            Node* next = curr->next[0];
+            delete curr;
+            curr = next;
+        }
+        head = nullptr;
+        total_size = 0;
+    }
 };

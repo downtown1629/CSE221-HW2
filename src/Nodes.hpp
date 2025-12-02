@@ -14,9 +14,15 @@ constexpr size_t NODE_MIN_SIZE = 256;   // 병합 기준 등으로 쓰면 여기
 struct CompactNode {
     std::vector<char> buf;
     
-    // 생성자
     CompactNode() = default;
-    CompactNode(std::vector<char>&& data) : buf(std::move(data)) {}
+
+    explicit CompactNode(std::vector<char>&& data) : buf(std::move(data)) {}
+
+    CompactNode(const CompactNode&) = default;
+    CompactNode& operator=(const CompactNode&) = default;
+    CompactNode(CompactNode&&) noexcept = default;
+    CompactNode& operator=(CompactNode&&) noexcept = default;
+    ~CompactNode() = default;
 
     size_t size() const { return buf.size(); }
     char at(size_t i) const { return buf[i]; }
@@ -33,12 +39,19 @@ struct GapNode {
     size_t gap_end;
 
     // 생성자: 기본 용량 할당
-    GapNode(size_t capacity = DEFAULT_GAP_SIZE) {
+    explicit GapNode(size_t capacity = DEFAULT_GAP_SIZE) {
         if (capacity < DEFAULT_GAP_SIZE) capacity = DEFAULT_GAP_SIZE;
         buf.resize(capacity);
         gap_start = 0;
         gap_end = capacity;
     }
+
+    // Rule of Five
+    GapNode(const GapNode&) = default;
+    GapNode& operator=(const GapNode&) = default;
+    GapNode(GapNode&&) noexcept = default;
+    GapNode& operator=(GapNode&&) noexcept = default;
+    ~GapNode() = default;
 
     // 논리적 크기 (Gap 제외)
     size_t size() const {
@@ -221,7 +234,15 @@ struct Node {
     NodeData data;
     std::vector<Node*> next;
     std::vector<size_t> span;
-    Node(int level) : next(level, nullptr), span(level, 0), data(GapNode{}) {}
+
+    explicit Node(int level) : next(level, nullptr), span(level, 0), data(GapNode{}) {}
+
+    Node(const Node&) = delete;
+    Node& operator=(const Node&) = delete;
+    Node(Node&&) noexcept = delete;
+    Node& operator=(Node&&) noexcept = delete;
+    ~Node() = default;
+
     size_t content_size() const {
         return std::visit([](auto const& n) { return n.size(); }, data);
     }

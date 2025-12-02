@@ -1,4 +1,6 @@
 #include "BiModalSkipList.hpp"
+#include <iostream>
+using namespace std;
 
 int main() {
     std::cout << "=== Bi-Modal Skip List Final Test ===\n";
