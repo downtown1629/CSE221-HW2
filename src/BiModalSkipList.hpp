@@ -144,7 +144,7 @@ public:
                 auto& gap = std::get<GapNode>(target->data);
                 gap.insert(0, s);
                 
-                for (size_t i = 0; i < target->next.size(); ++i) {
+                for (size_t i = 0; i < target->level; ++i) {
                     target->next[i] = nullptr; 
                     head->next[i] = target;
                     head->span[i] = target->content_size(); 
@@ -236,7 +236,7 @@ public:
             //    - Level 1 노드는 상위 레벨 포인터 수정 없이 O(1)로 제거 가능합니다.
             size_t combined_size = curr->content_size() + next_node->content_size();
             
-            if (combined_size <= NODE_MAX_SIZE && next_node->next.size() == 1) {
+            if (combined_size <= NODE_MAX_SIZE && next_node->level == 1) {
                 // --- 병합 로직 시작 (Inlined) ---
                 
                 // 1. 데이터 병합 (CompactNode끼리의 결합)
@@ -384,7 +384,7 @@ private:
         GapNode right_gap = u_gap.split_right(suffix_len);
 
         // 3) 새 노드 v를 만들고 right_gap을 data로 넣어준다.
-        int u_levels = static_cast<int>(u->next.size());
+        int u_levels = u->level;
         int new_level = random_level();
         if (new_level > u_levels) new_level = u_levels;
 

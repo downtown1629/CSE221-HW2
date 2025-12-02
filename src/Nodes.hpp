@@ -232,16 +232,50 @@ CompactNode compact(const GapNode& g) {
 
 struct Node {
     NodeData data;
-    std::vector<Node*> next;
-    std::vector<size_t> span;
+    
+    // 외부에서는 기존처럼 배열로 접근
+    Node** next;
+    size_t* span;
+    int level;
 
-    explicit Node(int level) : next(level, nullptr), span(level, 0), data(GapNode{}) {}
+private:
+    // [최적화 핵심] 실제 메모리 덩어리를 가리키는 포인터
+    char* memory_block;
 
+public:
+    Node(int lvl) : level(lvl), data(GapNode{}), memory_block(nullptr) {
+        // 1. 필요한 전체 메모리 크기 계산
+        // next 배열 크기 + span 배열 크기
+        size_t next_size = sizeof(Node*) * lvl;
+        size_t span_size = sizeof(size_t) * lvl;
+        
+        // 2. 한 번에 할당 (Single Allocation)
+        // char*로 할당하여 바이트 단위 포인터 연산 가능하게 함
+        memory_block = new char[next_size + span_size];
+
+        // 3. 포인터 연결 (Placement)
+        // 앞부분은 next 배열로 사용
+        next = reinterpret_cast<Node**>(memory_block);
+        
+        // 뒷부분은 span 배열로 사용
+        // (memory_block 시작 주소 + next 배열 크기) 위치부터 시작
+        span = reinterpret_cast<size_t*>(memory_block + next_size);
+
+        // 4. 초기화
+        std::fill(next, next + lvl, nullptr);
+        std::fill(span, span + lvl, 0);
+    }
+
+    ~Node() {
+        // 할당된 큰 덩어리 하나만 해제하면 됨
+        delete[] memory_block;
+    }
+
+    // Rule of Five 유지 (복사/이동 금지)
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
-    Node(Node&&) noexcept = delete;
-    Node& operator=(Node&&) noexcept = delete;
-    ~Node() = default;
+    Node(Node&&) = delete;
+    Node& operator=(Node&&) = delete;
 
     size_t content_size() const {
         return std::visit([](auto const& n) { return n.size(); }, data);
