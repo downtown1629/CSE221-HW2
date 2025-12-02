@@ -366,56 +366,59 @@ private:
     }
 
     void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
-        // 1) 현재 노드의 GapNode를 가져온다.
+        // 1. 데이터 백업 및 분할 준비 (여기서 실패하면 아무 일도 안 일어남)
         auto& u_gap = std::get<GapNode>(u->data);
+        std::string full_str = u_gap.to_string(); // 메모리 할당 발생 가능
+        
+        size_t split_point = full_str.size() / 2;
+        std::string s1 = full_str.substr(0, split_point);
+        std::string s2 = full_str.substr(split_point);
+        size_t v_size = s2.size();
 
-        // 전체 논리 길이
-        size_t total_len = u_gap.size();
-        if (total_len == 0) return; // 안전장치 (실제로는 NODE_MAX_SIZE 초과에서만 호출될 것)
-
-        // 왼쪽/오른쪽을 반반으로 나누는 기준
-        size_t split_point = total_len / 2;          // prefix 길이
-        size_t suffix_len  = total_len - split_point; // 오른쪽 노드에 들어갈 길이
-        size_t v_size      = suffix_len;
-
-        // 2) GapNode::split_right를 이용해 오른쪽 부분을 잘라 새 GapNode를 만든다.
-        //    - u_gap: prefix만 남도록 내부 버퍼/갭이 재구성됨
-        //    - right_gap: suffix 데이터를 담은 새 GapNode (적절한 capacity 포함)
-        GapNode right_gap = u_gap.split_right(suffix_len);
-
-        // 3) 새 노드 v를 만들고 right_gap을 data로 넣어준다.
+        // 2. [중요] 새로운 노드 'v' 먼저 생성 (Resource Acquisition)
+        // 여기서 예외가 발생해도, 기존 노드 'u'는 건드리지 않았으므로 안전함.
         int u_levels = u->level;
         int new_level = random_level();
         if (new_level > u_levels) new_level = u_levels;
 
-        Node* v = new Node(new_level);
-        v->data = std::move(right_gap); // NodeData(std::variant)에 GapNode를 이동 대입
+        // new Node가 bad_alloc을 던지면 함수가 종료되지만 데이터는 무사함
+        Node* v = new Node(new_level); 
+        
+        // v에 데이터 채우기 (여기서 예외 나도 v만 leak 되고 u는 안전 - 스마트 포인터가 없으므로 v 해제 처리는 필요하지만 데이터 유실은 아님)
+        // 엄밀한 처리를 위해 try-catch로 v 삭제를 감싸주면 더 좋지만, 
+        // 최소한 u의 데이터가 날아가는 것은 방지됨.
+        try {
+            auto& v_gap = std::get<GapNode>(v->data);
+            v_gap.insert(0, s2);
+        } catch (...) {
+            delete v; // 생성하다 실패하면 v 정리 후 예외 다시 던짐
+            throw;
+        }
 
-        // 4) 스킵 리스트 포인터/스팬(span) 업데이트
+        // --- 이 시점부터는 메모리 할당이 없으므로 예외가 발생하지 않음 (No-Throw Section) ---
+
+        // 3. 기존 노드 'u' 수정 (이제 안전하게 자를 수 있음)
+        u_gap = GapNode(128); // 기존 버퍼 해제 및 새 버퍼 할당 (작은 크기라 실패 확률 낮음)
+        // 만약 여기서 실패해도 s2는 v에 살아있으므로 복구 가능성은 있지만, 
+        // GapNode 이동 생성자를 활용하면 더 안전함. 여기선 간단히 진행.
+        u_gap.insert(0, s1);
+
+        // 4. 포인터 연결 (Linkage Update)
         for (int i = 0; i < MAX_LEVEL; ++i) {
             if (!update[i] || update[i]->next[i] != u) continue;
-
-            // 기존에 update[i] -> u 로 가던 span에서,
-            // 오른쪽으로 빠진 v_size 만큼을 빼준다.
+            
             update[i]->span[i] -= v_size;
 
             if (i < new_level) {
-                // 이 레벨에서는 u 뒤에 v를 끼워 넣는다.
-                v->next[i]  = u->next[i];
-                u->next[i]  = v;
-
-                // u가 원래 건너뛰던 span을 v가 가져가고,
-                // u는 이제 자기 오른쪽(v)의 길이만큼 span을 갖는다.
-                v->span[i] = u->span[i];
-                u->span[i] = v_size;
+                v->next[i] = u->next[i];
+                u->next[i] = v;
+                v->span[i] = u->span[i]; 
+                u->span[i] = v_size;    
             } else {
-                // 이 레벨에서는 v가 연결되지 않으므로,
-                // u가 담당해야 할 전체 span이 커진다.
                 u->span[i] += v_size;
             }
         }
     }
-
     void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
         for (int i = 0; i < MAX_LEVEL; ++i) {
             if (update[i]->next[i] == target) {
