@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -8,6 +10,7 @@
 #include <random>
 #include <array>
 #include <memory>
+
 
 constexpr size_t DEFAULT_GAP_SIZE = 128;
 
@@ -490,38 +493,54 @@ private:
     }
 
     void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
+        // 1) 현재 노드의 GapNode를 가져온다.
         auto& u_gap = std::get<GapNode>(u->data);
-        std::string full_str = u_gap.to_string(); 
-        
-        size_t split_point = full_str.size() / 2;
-        std::string s1 = full_str.substr(0, split_point);
-        std::string s2 = full_str.substr(split_point);
-        size_t v_size = s2.size();
 
-        u_gap = GapNode(128); 
-        u_gap.insert(0, s1);
+        // 전체 논리 길이
+        size_t total_len = u_gap.size();
+        if (total_len == 0) return; // 안전장치 (실제로는 NODE_MAX_SIZE 초과에서만 호출될 것)
 
-        int u_levels = u->next.size();
+        // 왼쪽/오른쪽을 반반으로 나누는 기준
+        size_t split_point = total_len / 2;          // prefix 길이
+        size_t suffix_len  = total_len - split_point; // 오른쪽 노드에 들어갈 길이
+        size_t v_size      = suffix_len;
+
+        // 2) GapNode::split_right를 이용해 오른쪽 부분을 잘라 새 GapNode를 만든다.
+        //    - u_gap: prefix만 남도록 내부 버퍼/갭이 재구성됨
+        //    - right_gap: suffix 데이터를 담은 새 GapNode (적절한 capacity 포함)
+        GapNode right_gap = u_gap.split_right(suffix_len);
+
+        // 3) 새 노드 v를 만들고 right_gap을 data로 넣어준다.
+        int u_levels = static_cast<int>(u->next.size());
         int new_level = random_level();
-        if (new_level > u_levels) new_level = u_levels; 
+        if (new_level > u_levels) new_level = u_levels;
 
         Node* v = new Node(new_level);
-        auto& v_gap = std::get<GapNode>(v->data);
-        v_gap.insert(0, s2);
+        v->data = std::move(right_gap); // NodeData(std::variant)에 GapNode를 이동 대입
 
+        // 4) 스킵 리스트 포인터/스팬(span) 업데이트
         for (int i = 0; i < MAX_LEVEL; ++i) {
             if (!update[i] || update[i]->next[i] != u) continue;
-            
+
+            // 기존에 update[i] -> u 로 가던 span에서,
+            // 오른쪽으로 빠진 v_size 만큼을 빼준다.
             update[i]->span[i] -= v_size;
 
             if (i < new_level) {
-                v->next[i] = u->next[i];
-                u->next[i] = v;
-                v->span[i] = u->span[i]; 
-                u->span[i] = v_size;    
+                // 이 레벨에서는 u 뒤에 v를 끼워 넣는다.
+                v->next[i]  = u->next[i];
+                u->next[i]  = v;
+
+                // u가 원래 건너뛰던 span을 v가 가져가고,
+                // u는 이제 자기 오른쪽(v)의 길이만큼 span을 갖는다.
+                v->span[i] = u->span[i];
+                u->span[i] = v_size;
             } else {
+                // 이 레벨에서는 v가 연결되지 않으므로,
+                // u가 담당해야 할 전체 span이 커진다.
                 u->span[i] += v_size;
             }
         }
     }
+
 };

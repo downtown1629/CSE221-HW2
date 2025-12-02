@@ -27,8 +27,8 @@ public:
 };
 
 // --- 테스트 파라미터 ---
-const int INITIAL_SIZE = 2000000;   // 초기 텍스트 크기
-const int INSERT_COUNT = 200000;    // 중간 삽입 횟수 (Typing Simulation)
+const int INITIAL_SIZE = 200000;   // 초기 텍스트 크기
+const int INSERT_COUNT = 20000;    // 중간 삽입 횟수 (Typing Simulation)
 const string CHUNK = "A";         // 한 번에 타이핑하는 문자열
 
 // 1. std::vector 벤치마크
