@@ -210,6 +210,8 @@ public:
         return res;
     }
 
+    
+
     void optimize() {
         Node* curr = head->next[0];
         while (curr) {
@@ -221,6 +223,54 @@ public:
     }
     
     size_t size() const { return total_size; }
+
+        
+    void clear() {
+        Node* curr = head;
+        while (curr) {
+            Node* next = curr->next[0];
+            delete curr;
+            curr = next;
+        }
+        head = nullptr;
+        total_size = 0;
+    }
+
+    void erase(size_t pos, size_t len) {
+        if (pos >= total_size) return;
+        if (pos + len > total_size) len = total_size - pos;
+
+        while (len > 0) {
+            std::array<Node*, MAX_LEVEL> update;
+            std::array<size_t, MAX_LEVEL> rank;
+            size_t offset = 0;
+
+            Node* target = find_node(pos, offset, update, rank);
+            if (!target) break;
+
+            size_t available = target->content_size() - offset;
+            size_t del_len = std::min(len, available);
+
+            if (std::holds_alternative<CompactNode>(target->data)) {
+                target->data = expand(std::get<CompactNode>(target->data));
+            }
+
+            for (int i = 0; i < MAX_LEVEL; ++i) {
+                if (update[i]) {
+                    update[i]->span[i] -= del_len;
+                }
+            }
+
+            std::get<GapNode>(target->data).erase(offset, del_len);
+            
+            total_size -= del_len;
+            len -= del_len;
+
+            if (target->content_size() == 0) {
+                remove_node(target, update);
+            }
+        }
+    }
 
 private:
     static constexpr int MAX_LEVEL = 16;
@@ -319,16 +369,15 @@ private:
             }
         }
     }
-
     
-    void clear() {
-        Node* curr = head;
-        while (curr) {
-            Node* next = curr->next[0];
-            delete curr;
-            curr = next;
+    void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
+        for (int i = 0; i < MAX_LEVEL; ++i) {
+            if (update[i]->next[i] == target) {
+                update[i]->next[i] = target->next[i];
+                update[i]->span[i] += target->span[i];
+            }
         }
-        head = nullptr;
-        total_size = 0;
+        delete target;
     }
+
 };
