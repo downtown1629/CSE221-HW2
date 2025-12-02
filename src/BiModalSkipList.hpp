@@ -214,11 +214,57 @@ public:
 
     void optimize() {
         Node* curr = head->next[0];
+
+        // [Phase 1] Transmutation: 모든 GapNode를 CompactNode로 변환
+        // - 메모리 단편화를 줄이고 읽기 속도(SIMD 친화적)를 확보합니다.
         while (curr) {
             if (std::holds_alternative<GapNode>(curr->data)) {
                 curr->data = compact(std::get<GapNode>(curr->data));
             }
             curr = curr->next[0];
+        }
+
+        // [Phase 2] Defragmentation: 인접한 작은 노드들을 하나로 병합
+        // - 노드 수를 줄여 Skip List 탐색(Jump) 효율을 높입니다.
+        curr = head->next[0];
+        while (curr && curr->next[0]) {
+            Node* next_node = curr->next[0];
+            
+            // 병합 조건 검사
+            // 1. 크기 제한: 두 노드를 합쳐도 NODE_MAX_SIZE를 넘지 않는가?
+            // 2. [중요] 최적화: 다음 노드가 Level 1(바닥 레벨)인가?
+            //    - Level 1 노드는 상위 레벨 포인터 수정 없이 O(1)로 제거 가능합니다.
+            size_t combined_size = curr->content_size() + next_node->content_size();
+            
+            if (combined_size <= NODE_MAX_SIZE && next_node->next.size() == 1) {
+                // --- 병합 로직 시작 (Inlined) ---
+                
+                // 1. 데이터 병합 (CompactNode끼리의 결합)
+                auto& curr_buf = std::get<CompactNode>(curr->data).buf;
+                auto& next_buf = std::get<CompactNode>(next_node->data).buf;
+                
+                // 다음 노드의 데이터를 현재 노드 뒤에 복사
+                curr_buf.insert(curr_buf.end(), next_buf.begin(), next_buf.end());
+
+                // 2. 링크(Next Pointer) 수정
+                // next_node를 건너뛰고 그 다음 노드를 가리킴
+                curr->next[0] = next_node->next[0];
+
+                // 3. Span 업데이트
+                // 현재 노드의 span에 사라지는 노드의 span(크기)을 더함
+                curr->span[0] += next_node->span[0];
+
+                // 4. 메모리 해제
+                delete next_node;
+                
+                // --- 병합 로직 끝 ---
+
+                // 주의: 병합이 일어났을 경우 curr를 이동시키지 않음
+                // 합쳐진 현재 노드가 새로운 다음 노드와 또 합쳐질 수 있기 때문입니다.
+            } else {
+                // 병합하지 않았다면 다음 노드로 이동
+                curr = next_node;
+            }
         }
     }
     
@@ -369,7 +415,7 @@ private:
             }
         }
     }
-    
+
     void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
         for (int i = 0; i < MAX_LEVEL; ++i) {
             if (update[i]->next[i] == target) {
