@@ -1,5 +1,3 @@
-CXX = g++
-
 CXXFLAGS   = -std=c++17 -O3 -march=native -Wall -Wextra -Isrc
 DEBUGFLAGS = -std=c++17 -Og -march=native -g -fsanitize=address -Wall -Wextra -Isrc
 
