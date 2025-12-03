@@ -243,7 +243,7 @@ private:
     char* memory_block;
 
 public:
-    Node(int lvl) : level(lvl), data(GapNode{}), memory_block(nullptr) {
+    Node(int lvl) : data(GapNode{}), level(lvl), memory_block(nullptr) {
         // 1. 필요한 전체 메모리 크기 계산
         // next 배열 크기 + span 배열 크기
         size_t next_size = sizeof(Node*) * lvl;
