@@ -189,14 +189,23 @@ public:
 
     char at(size_t pos) const {
         if (pos >= total_size) throw std::out_of_range("Index out of range");
-        std::array<Node*, MAX_LEVEL> update;
-        std::array<size_t, MAX_LEVEL> rank;
-        size_t node_offset = 0;
         
-        Node* target = find_node(pos, node_offset, update, rank);
+        // 직접 인라인 탐색 - 가장 간단하고 빠름
+        Node* x = head;
+        size_t accumulated = 0;
         
+        for (int i = MAX_LEVEL - 1; i >= 0; --i) {
+            while (x->next[i] && (accumulated + x->span[i] <= pos)) {
+                accumulated += x->span[i];
+                x = x->next[i];
+            }
+        }
+        
+        Node* target = x->next[0];
         if (!target) throw std::runtime_error("Node structure corruption");
-        return std::visit([&](auto const& n) { return n.at(node_offset); }, target->data);
+        
+        size_t offset = pos - accumulated;
+        return std::visit([offset](auto const& n) { return n.at(offset); }, target->data);
     }
 
     // Iterator를 타지 않고, 노드 내부 버퍼를 통째로 append 하여 대역폭 활용 극대화
