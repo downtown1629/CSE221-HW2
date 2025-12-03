@@ -7,13 +7,14 @@
 #include <numeric>
 #include <iomanip>
 #include <random>
-#include <cstring> // for memmove
-#include <algorithm> // for max
+#include <cstring> 
+#include <algorithm>
 
-// BiModalSkipList 헤더 포함
+// 헤더 파일 포함
 #include "BiModalSkipList.hpp"
+#include "SimplePieceTable.hpp" // [추가됨] Piece Table 분리
 
-// Rope 지원 여부 확인 (Mac/Linux 호환성)
+// Rope 지원 여부 확인
 #if __has_include(<ext/rope>)
     #include <ext/rope>
     using namespace __gnu_cxx;
@@ -40,7 +41,7 @@ public:
 };
 
 // =========================================================
-//  Utility: Simple Gap Buffer (Baseline Implementation)
+//  Utility: Simple Gap Buffer (Baseline)
 // =========================================================
 class SimpleGapBuffer {
     std::vector<char> buf;
@@ -56,20 +57,17 @@ public:
 
     size_t size() const { return buf.size() - (gap_end - gap_start); }
 
-    // Gap 이동 (memmove 최적화 적용)
     void move_gap(size_t pos) {
         if (pos == gap_start) return;
         char* ptr = buf.data();
         
         if (pos > gap_start) {
             size_t dist = pos - gap_start;
-            // Gap 뒤의 데이터를 앞으로 당김
             std::memmove(ptr + gap_start, ptr + gap_end, dist);
             gap_start += dist;
             gap_end += dist;
         } else {
             size_t dist = gap_start - pos;
-            // Gap 앞의 데이터를 뒤로 밈
             std::memmove(ptr + gap_end - dist, ptr + pos, dist);
             gap_start -= dist;
             gap_end -= dist;
@@ -79,21 +77,14 @@ public:
     void insert(size_t pos, char c) {
         if (pos > size()) pos = size();
         move_gap(pos);
-
-        if (gap_start == gap_end) {
-            expand(1024);
-        }
+        if (gap_start == gap_end) expand(1024);
         buf[gap_start++] = c;
     }
     
-    // std::string처럼 문자열 삽입 지원
     void insert(size_t pos, std::string_view s) {
         if (pos > size()) pos = size();
         move_gap(pos);
-        
-        if (gap_end - gap_start < s.size()) {
-            expand(s.size());
-        }
+        if (gap_end - gap_start < s.size()) expand(s.size());
         std::memcpy(buf.data() + gap_start, s.data(), s.size());
         gap_start += s.size();
     }
@@ -107,11 +98,9 @@ private:
         size_t old_cap = buf.size();
         size_t new_cap = std::max(old_cap * 2, old_cap + needed);
         std::vector<char> new_buf(new_cap);
-        
         size_t back_len = old_cap - gap_end;
         std::memcpy(new_buf.data(), buf.data(), gap_start);
         std::memcpy(new_buf.data() + new_cap - back_len, buf.data() + gap_end, back_len);
-        
         buf = std::move(new_buf);
         gap_end = new_cap - back_len;
     }
@@ -120,11 +109,9 @@ private:
 // =========================================================
 //  Test Parameters
 // =========================================================
-const int INITIAL_SIZE = 200000;   // 초기 텍스트 크기
-const int INSERT_COUNT = 20000;    // 중간 삽입 횟수 (Typing)
-const string CHUNK = "A";
-
-long long dummy_checksum = 0; // 컴파일러 최적화 방지용
+const int INITIAL_SIZE = 200000;
+const int INSERT_COUNT = 20000;
+long long dummy_checksum = 0;
 
 // =========================================================
 //  Benchmarks
@@ -134,7 +121,6 @@ void bench_vector() {
     vector<char> v(INITIAL_SIZE, 'x');
     Timer t;
 
-    // Typing (Middle Insert)
     size_t mid = v.size() / 2;
     t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
@@ -142,7 +128,6 @@ void bench_vector() {
     }
     double time_insert = t.elapsed_ms();
 
-    // Reading
     long long sum = 0;
     t.reset();
     for (char c : v) sum += c;
@@ -159,7 +144,6 @@ void bench_deque() {
     deque<char> d(INITIAL_SIZE, 'x');
     Timer t;
 
-    // Typing
     size_t mid = d.size() / 2;
     t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
@@ -167,7 +151,6 @@ void bench_deque() {
     }
     double time_insert = t.elapsed_ms();
 
-    // Reading
     long long sum = 0;
     t.reset();
     for (char c : d) sum += c;
@@ -180,39 +163,10 @@ void bench_deque() {
          << " (Fragmented)" << endl;
 }
 
-void bench_list() {
-    list<char> l(INITIAL_SIZE, 'x');
-    
-    // Iterator 미리 이동 (검색 시간 제외, 순수 삽입만 측정하기 위해)
-    auto it = l.begin();
-    advance(it, l.size() / 2);
-    
-    Timer t;
-    // Typing
-    t.reset();
-    for (int i = 0; i < INSERT_COUNT; ++i) {
-        l.insert(it, 'A');
-    }
-    double time_insert = t.elapsed_ms();
-
-    // Reading
-    long long sum = 0;
-    t.reset();
-    for (char c : l) sum += c;
-    double time_read = t.elapsed_ms();
-    dummy_checksum += sum;
-
-    cout << left << setw(18) << "std::list" 
-         << setw(15) << time_insert 
-         << setw(15) << time_read 
-         << " (Cache Miss)" << endl;
-}
-
 void bench_string() {
     string s(INITIAL_SIZE, 'x');
     Timer t;
 
-    // Typing
     size_t mid = s.size() / 2;
     t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
@@ -221,7 +175,6 @@ void bench_string() {
     }
     double time_insert = t.elapsed_ms();
 
-    // Reading
     long long sum = 0;
     t.reset();
     for (char c : s) sum += c;
@@ -236,21 +189,18 @@ void bench_string() {
 
 void bench_simple_gap() {
     SimpleGapBuffer gb(INITIAL_SIZE + INSERT_COUNT);
-    // 초기 더미 데이터 채우기
     gb.insert(0, string(INITIAL_SIZE, 'x'));
     
     Timer t;
-    // Typing (한 위치에서 계속 입력 -> Gap 이동 없음 -> 매우 빠름)
     size_t mid = gb.size() / 2;
-    gb.move_gap(mid); // 커서 이동 비용 1회
+    gb.move_gap(mid); 
 
     t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
-        gb.insert(gb.size() / 2, 'A'); // Gap이 이미 거기 있으므로 O(1)
+        gb.insert(gb.size() / 2, 'A'); 
     }
     double time_insert = t.elapsed_ms();
 
-    // Reading
     long long sum = 0;
     t.reset();
     for(size_t i=0; i<gb.size(); ++i) sum += gb.at(i);
@@ -261,6 +211,27 @@ void bench_simple_gap() {
          << setw(15) << time_insert 
          << setw(15) << time_read 
          << " (Ideal Typing)" << endl;
+}
+
+void bench_piece_table() {
+    SimplePieceTable pt;
+    pt.insert(0, string(INITIAL_SIZE, 'x'));
+
+    Timer t;
+    size_t mid = pt.size() / 2;
+    t.reset();
+    for (int i = 0; i < INSERT_COUNT; ++i) {
+        pt.insert(mid + i, "A"); 
+    }
+    double time_insert = t.elapsed_ms();
+
+    // Piece Table naive read is too slow for large N, report N/A or partial
+    double time_read = 0.0; 
+    
+    cout << left << setw(18) << "Piece Table" 
+         << setw(15) << time_insert 
+         << setw(15) << "N/A (O(N^2))" 
+         << " (Linked List)" << endl;
 }
 
 void bench_rope() {
@@ -295,28 +266,20 @@ void bench_rope() {
 
 void bench_bimodal() {
     BiModalText bmt;
-    // 초기 데이터
     for(int i=0; i<INITIAL_SIZE/1000; ++i) bmt.insert(bmt.size(), string(1000, 'x'));
-    bmt.optimize(); // 공정하게 Compact 모드에서 시작
+    bmt.optimize(); 
 
     Timer t;
     size_t mid = bmt.size() / 2;
     
-    // Typing
     t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
         bmt.insert(mid + i, "A"); 
     }
     double time_insert = t.elapsed_ms();
 
-    // Optimize Overhead check
-    Timer t_opt;
-    bmt.optimize();
-    double time_opt = t_opt.elapsed_ms();
-
-    // Reading (Scan 사용)
-    long long sum = 0;
     t.reset();
+    long long sum = 0;
     bmt.scan([&](char c) { sum += c; });
     double time_read = t.elapsed_ms();
     dummy_checksum += sum;
@@ -324,9 +287,12 @@ void bench_bimodal() {
     cout << left << setw(18) << "BiModalText" 
          << setw(15) << time_insert 
          << setw(15) << time_read 
-         << " (Target)" << "\n" << "(Opt: "
-         << time_opt << "ms)" << endl; // <-- 이렇게 추가
+         << " (Target)" << endl;
 }
+
+// =========================================================
+//  Scenarios
+// =========================================================
 
 void bench_heavy_typer() {
     const int LARGE_SIZE = 2 * 1024 * 1024; // 2MB
@@ -337,7 +303,6 @@ void bench_heavy_typer() {
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
 
-    // 1. std::vector (최악의 케이스)
     {
         vector<char> v(LARGE_SIZE, 'x');
         Timer t;
@@ -346,27 +311,24 @@ void bench_heavy_typer() {
         cout << left << setw(18) << "std::vector" << setw(15) << t.elapsed_ms() << "(Shift Hell)" << endl;
     }
 
-    // 2. std::deque (Vector보다 낫지만 여전히 느림)
-    {
-        deque<char> d(LARGE_SIZE, 'x');
-        Timer t;
-        size_t mid = d.size() / 2;
-        for(int i=0; i<HEAVY_INSERTS; ++i) d.insert(d.begin() + mid, 'A');
-        cout << left << setw(18) << "std::deque" << setw(15) << t.elapsed_ms() << "(Still Slow)" << endl;
-    }
-
-    // 3. SimpleGapBuffer (이상적인 상황 - 커서 고정)
     {
         SimpleGapBuffer gb(LARGE_SIZE + HEAVY_INSERTS);
         gb.insert(0, string(LARGE_SIZE, 'x'));
-        gb.move_gap(LARGE_SIZE / 2); // 미리 이동 (공정한 비교)
-        
+        gb.move_gap(LARGE_SIZE / 2); 
         Timer t;
-        for(int i=0; i<HEAVY_INSERTS; ++i) gb.insert(gb.size() / 2, 'A'); // Gap 이동 없음
+        for(int i=0; i<HEAVY_INSERTS; ++i) gb.insert(gb.size() / 2, 'A');
         cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << t.elapsed_ms() << "(Fastest)" << endl;
     }
 
-    // 4. Rope
+    {
+        SimplePieceTable pt;
+        pt.insert(0, string(LARGE_SIZE, 'x'));
+        Timer t;
+        size_t mid = pt.size() / 2;
+        for(int i=0; i<HEAVY_INSERTS; ++i) pt.insert(mid + i, "A");
+        cout << left << setw(18) << "Piece Table" << setw(15) << t.elapsed_ms() << "(List Walk)" << endl;
+    }
+
 #if ROPE_AVAILABLE
     {
         crope r(LARGE_SIZE, 'x');
@@ -377,11 +339,10 @@ void bench_heavy_typer() {
     }
 #endif
 
-    // 5. BiModalText
     {
         BiModalText bmt;
-        string chunk(1024, 'x');
-        for(int i=0; i<2048; ++i) bmt.insert(bmt.size(), chunk); // 2MB
+        string chunk(4096, 'x');
+        for(int i=0; i<512; ++i) bmt.insert(bmt.size(), chunk); // 2MB
         bmt.optimize(); 
 
         Timer t;
@@ -400,7 +361,6 @@ void bench_deletion() {
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
 
-    // 1. std::vector
     {
         vector<char> v(INITIAL_N, 'x');
         size_t pos = v.size() / 2;
@@ -409,29 +369,25 @@ void bench_deletion() {
         cout << left << setw(18) << "std::vector" << setw(15) << t.elapsed_ms() << "(Shift)" << endl;
     }
 
-    // 2. std::list (삭제 최강자)
     {
-        list<char> l(INITIAL_N, 'x');
-        auto it = l.begin();
-        advance(it, l.size() / 2);
+        SimplePieceTable pt;
+        pt.insert(0, string(INITIAL_N, 'x'));
+        size_t pos = pt.size() / 2;
         Timer t;
-        for(int i=0; i<DELETE_OPS; ++i) it = l.erase(it);
-        cout << left << setw(18) << "std::list" << setw(15) << t.elapsed_ms() << "(O(1))" << endl;
+        for(int i=0; i<DELETE_OPS; ++i) pt.erase(pos, 1);
+        cout << left << setw(18) << "Piece Table" << setw(15) << t.elapsed_ms() << "(List Split)" << endl;
     }
 
-    // 3. Rope
 #if ROPE_AVAILABLE
     {
         crope r(INITIAL_N, 'x');
         size_t pos = r.size() / 2;
         Timer t;
-        // Rope 삭제: erase(pos, len)
         for(int i=0; i<DELETE_OPS; ++i) r.erase(pos, 1);
         cout << left << setw(18) << "SGI Rope" << setw(15) << t.elapsed_ms() << "(Tree Rebal)" << endl;
     }
 #endif
 
-    // 4. BiModalText
     {
         BiModalText bmt;
         for(int i=0; i<INITIAL_N/1000; ++i) bmt.insert(0, string(1000, 'x'));
@@ -439,7 +395,6 @@ void bench_deletion() {
 
         size_t pos = bmt.size() / 2;
         Timer t;
-        // BiModal 삭제: erase(pos, len)
         for(int i=0; i<DELETE_OPS; ++i) bmt.erase(pos, 1);
         cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Gap Expand)" << endl;
     }
@@ -454,22 +409,19 @@ void bench_mixed_workload() {
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
 
-    // 1. std::string (비교 기준)
     {
         string s(N, 'x');
         long long sum = 0;
         Timer t;
         for(int i=0; i<ITERATIONS; ++i) {
-            size_t pos = (i * 1234) % s.size(); // Random-like
-            char c = s[pos]; // Read O(1)
-            sum += c;
-            s.insert(pos, "A"); // Write O(N)
+            size_t pos = (i * 1234) % s.size(); 
+            sum += s[pos];
+            s.insert(pos, "A"); 
         }
         cout << left << setw(18) << "std::string" << setw(15) << t.elapsed_ms() << "(Fast Read)" << endl;
         dummy_checksum += sum;
     }
 
-    // 2. SimpleGapBuffer (이동 비용 큼)
     {
         SimpleGapBuffer gb(N + ITERATIONS);
         gb.insert(0, string(N, 'x'));
@@ -477,15 +429,27 @@ void bench_mixed_workload() {
         Timer t;
         for(int i=0; i<ITERATIONS; ++i) {
             size_t pos = (i * 1234) % gb.size();
-            char c = gb.at(pos); // Read O(1)
-            sum += c;
-            gb.insert(pos, 'A'); // Write O(N) Gap Move
+            sum += gb.at(pos); 
+            gb.insert(pos, 'A');
         }
         cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << t.elapsed_ms() << "(Gap Thrash)" << endl;
         dummy_checksum += sum;
     }
 
-    // 3. Rope
+    {
+        SimplePieceTable pt;
+        pt.insert(0, string(N, 'x'));
+        long long sum = 0;
+        Timer t;
+        for(int i=0; i<ITERATIONS; ++i) {
+            size_t pos = (i * 1234) % pt.size();
+            sum += pt.at(pos); // O(N) Scan for each read
+            pt.insert(pos, "A"); // O(N) Scan for each insert
+        }
+        cout << left << setw(18) << "Piece Table" << setw(15) << t.elapsed_ms() << "(Slow Search)" << endl;
+        dummy_checksum += sum;
+    }
+
 #if ROPE_AVAILABLE
     {
         crope r(N, 'x');
@@ -493,16 +457,14 @@ void bench_mixed_workload() {
         Timer t;
         for(int i=0; i<ITERATIONS; ++i) {
             size_t pos = (i * 1234) % r.size();
-            char c = r[pos]; // Read O(log N) - 조금 느릴 수 있음
-            sum += c;
-            r.insert(pos, "A"); // Write O(log N)
+            sum += r[pos]; 
+            r.insert(pos, "A"); 
         }
         cout << left << setw(18) << "SGI Rope" << setw(15) << t.elapsed_ms() << "(Balanced)" << endl;
         dummy_checksum += sum;
     }
 #endif
 
-    // 4. BiModalText
     {
         BiModalText bmt;
         string chunk(1000, 'x');
@@ -513,10 +475,7 @@ void bench_mixed_workload() {
         Timer t;
         for(int i=0; i<ITERATIONS; ++i) {
             size_t pos = (i * 1234) % bmt.size();
-            // Read: O(log N) via optimized at()
-            char c = bmt.at(pos); 
-            sum += c;
-            // Write: O(log N) search + O(1) insert
+            sum += bmt.at(pos); 
             bmt.insert(pos, "A");
         }
         cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Balanced)" << endl;
@@ -524,12 +483,9 @@ void bench_mixed_workload() {
     }
 }
 
-// =========================================================
-//  Scenario: Random Index Insertion (The Real Test)
-// =========================================================
 void bench_random_access() {
     const int TEST_SIZE = 100000; 
-    const int RAND_INSERTS = 5000; // 랜덤 이동 횟수
+    const int RAND_INSERTS = 5000; 
     
     cout << "\n[Scenario: Random Cursor Movement & Insertion]" << endl;
     cout << "  - N=" << TEST_SIZE << ", Inserts=" << RAND_INSERTS << endl;
@@ -540,15 +496,12 @@ void bench_random_access() {
     mt19937 gen(1234);
     uniform_int_distribution<> dist(0, TEST_SIZE);
 
-    // 1. SimpleGapBuffer
     {
         SimpleGapBuffer gb(TEST_SIZE + RAND_INSERTS);
         gb.insert(0, string(TEST_SIZE, 'x'));
-        
         Timer t;
         for (int i = 0; i < RAND_INSERTS; ++i) {
             size_t pos = dist(gen) % gb.size();
-            // Gap 이동 비용(O(N)) 발생
             gb.insert(pos, 'A'); 
         }
         cout << left << setw(18) << "SimpleGapBuffer" 
@@ -556,33 +509,20 @@ void bench_random_access() {
              << "(Slow Gap Move)" << endl;
     }
 
-    // 2. std::vector
     {
-        vector<char> v(TEST_SIZE, 'x');
+        SimplePieceTable pt;
+        pt.insert(0, string(TEST_SIZE, 'x'));
         Timer t;
         for (int i = 0; i < RAND_INSERTS; ++i) {
-            size_t pos = dist(gen) % v.size();
-            v.insert(v.begin() + pos, 'A'); 
+            size_t pos = dist(gen) % pt.size();
+            // Naive Piece Table Search is O(N) -> Total O(M * N)
+            pt.insert(pos, "A"); 
         }
-        cout << left << setw(18) << "std::vector" 
+        cout << left << setw(18) << "Piece Table" 
              << setw(15) << t.elapsed_ms() 
-             << "(O(N) Shift)" << endl;
+             << "(O(N) Search)" << endl;
     }
 
-    // 3. std::deque
-    {
-        deque<char> d(TEST_SIZE, 'x');
-        Timer t;
-        for (int i = 0; i < RAND_INSERTS; ++i) {
-            size_t pos = dist(gen) % d.size();
-            d.insert(d.begin() + pos, 'A'); 
-        }
-        cout << left << setw(18) << "std::deque" 
-             << setw(15) << t.elapsed_ms() 
-             << "(O(N) Shift)" << endl;
-    }
-
-    // 4. Rope
 #if ROPE_AVAILABLE
     {
         crope r(TEST_SIZE, 'x');
@@ -597,7 +537,6 @@ void bench_random_access() {
     }
 #endif
 
-    // 5. BiModalText
     {
         BiModalText bmt;
         for(int i=0; i<TEST_SIZE/1000; ++i) bmt.insert(0, string(1000, 'x'));
@@ -606,7 +545,6 @@ void bench_random_access() {
         Timer t;
         for (int i = 0; i < RAND_INSERTS; ++i) {
             size_t pos = dist(gen) % bmt.size();
-            // Search O(log N) + Insert O(1)
             bmt.insert(pos, "A"); 
         }
         cout << left << setw(18) << "BiModalText" 
@@ -627,9 +565,9 @@ int main() {
 
     bench_vector();
     bench_deque();
-    bench_list();
     bench_string();
     bench_simple_gap();
+    bench_piece_table(); // Added
     bench_rope();
     bench_bimodal();
 
@@ -639,9 +577,6 @@ int main() {
 
     bench_random_access();
 
-    // 최적화 방지용 (실제 출력은 안함)
     if (dummy_checksum == 123456789) cout << ""; 
-
-    cout << "==============================================================" << endl;
     return 0;
 }
