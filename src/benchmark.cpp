@@ -12,7 +12,7 @@
 
 // 헤더 파일 포함
 #include "BiModalSkipList.hpp"
-#include "Baselines.hpp" // [추가됨] Piece Table 분리
+#include "Baselines.hpp" // Piece Table, Gap Buffer 분리
 
 // Rope 지원 여부 확인
 #if __has_include(<ext/rope>)
@@ -43,8 +43,8 @@ public:
 // =========================================================
 //  Test Parameters
 // =========================================================
-const int INITIAL_SIZE = 200000;
-const int INSERT_COUNT = 20000;
+const int INITIAL_SIZE = 500000;
+const int INSERT_COUNT = 50000;
 long long dummy_checksum = 0;
 
 // =========================================================
@@ -153,16 +153,23 @@ void bench_piece_table() {
 
     Timer t;
     size_t mid = pt.size() / 2;
+    // Typing Insert
     t.reset();
     for (int i = 0; i < INSERT_COUNT; ++i) {
         pt.insert(mid + i, "A"); 
     }
     double time_insert = t.elapsed_ms();
 
-    // Piece Table naive read is too slow for large N, report N/A or partial    
-    cout << left << setw(18) << "Piece Table" 
+    // Reading (Scan) - 이제 실제로 측정합니다.
+    long long sum = 0;
+    t.reset();
+    pt.scan([&](char c) { sum += c; }); // scan 메서드 사용
+    double time_read = t.elapsed_ms();
+    dummy_checksum += sum;
+    
+    cout << left << setw(18) << "SimplePieceTable" 
          << setw(15) << time_insert 
-         << setw(15) << "N/A (O(N^2))" 
+         << setw(15) << time_read       // 결과 출력
          << " (Linked List)" << endl;
 }
 
@@ -258,7 +265,7 @@ void bench_heavy_typer() {
         Timer t;
         size_t mid = pt.size() / 2;
         for(int i=0; i<HEAVY_INSERTS; ++i) pt.insert(mid + i, "A");
-        cout << left << setw(18) << "Piece Table" << setw(15) << t.elapsed_ms() << "(List Walk)" << endl;
+        cout << left << setw(18) << "SimplePieceTable" << setw(15) << t.elapsed_ms() << "(List Walk)" << endl;
     }
 
 #if ROPE_AVAILABLE
@@ -307,7 +314,7 @@ void bench_deletion() {
         size_t pos = pt.size() / 2;
         Timer t;
         for(int i=0; i<DELETE_OPS; ++i) pt.erase(pos, 1);
-        cout << left << setw(18) << "Piece Table" << setw(15) << t.elapsed_ms() << "(List Split)" << endl;
+        cout << left << setw(18) << "SimplePieceTable" << setw(15) << t.elapsed_ms() << "(List Split)" << endl;
     }
 
 #if ROPE_AVAILABLE
@@ -378,7 +385,7 @@ void bench_mixed_workload() {
             sum += pt.at(pos); // O(N) Scan for each read
             pt.insert(pos, "A"); // O(N) Scan for each insert
         }
-        cout << left << setw(18) << "Piece Table" << setw(15) << t.elapsed_ms() << "(Slow Search)" << endl;
+        cout << left << setw(18) << "SimplePieceTable" << setw(15) << t.elapsed_ms() << "(Slow Search)" << endl;
         dummy_checksum += sum;
     }
 
@@ -450,7 +457,7 @@ void bench_random_access() {
             // Naive Piece Table Search is O(N) -> Total O(M * N)
             pt.insert(pos, "A"); 
         }
-        cout << left << setw(18) << "Piece Table" 
+        cout << left << setw(18) << "SimplePieceTable" 
              << setw(15) << t.elapsed_ms() 
              << "(O(N) Search)" << endl;
     }

@@ -96,6 +96,19 @@ public:
         return total_length;
     }
     
+    template <typename Func>
+    void scan(Func func) const {
+        for (const auto& p : pieces) {
+            // 해당 Piece가 가리키는 버퍼 선택
+            const std::string& target_buf = (p.source == Piece::ORIGINAL) ? original_buffer : add_buffer;
+            // 포인터 연산으로 빠른 접근
+            const char* data_ptr = target_buf.data() + p.start;
+            for (size_t i = 0; i < p.length; ++i) {
+                func(data_ptr[i]);
+            }
+        }
+    }
+
     void insert(size_t pos, const std::string& s) {
         if (s.empty()) return;
 
