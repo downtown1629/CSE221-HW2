@@ -40,23 +40,31 @@ public:
         const Node* curr_node;
         size_t offset;
         
-        // 캐싱 변수 (읽기 최적화용)
+        // --- [캐싱 변수] ---
         const char* cached_ptr;
+        size_t cached_len;    // [New] 현재 노드의 데이터 크기 캐싱
         bool is_compact;
 
         void update_cache() {
             if (!curr_node) {
                 cached_ptr = nullptr;
+                cached_len = 0;
                 is_compact = false;
                 return;
             }
+            
+            // 노드 타입에 따라 길이와 포인터를 미리 가져옴 (std::visit 1회 수행)
             if (std::holds_alternative<CompactNode>(curr_node->data)) {
-                is_compact = true;
                 const auto& c_node = std::get<CompactNode>(curr_node->data);
+                is_compact = true;
                 cached_ptr = c_node.buf.data();
+                cached_len = c_node.buf.size();
             } else {
+                const auto& g_node = std::get<GapNode>(curr_node->data);
                 is_compact = false;
-                cached_ptr = nullptr;
+                cached_len = g_node.size();
+                // GapNode는 포인터 하나로 표현 불가능하므로 cached_ptr은 사용 안 함(혹은 부분 사용)
+                cached_ptr = nullptr; 
             }
         }
 
@@ -69,23 +77,21 @@ public:
             if (!curr_node) return '\0';
             // Compact 모드면 포인터 직접 접근 (Fast Path)
             if (is_compact) return cached_ptr[offset];
-            // Gap 모드면 기존 방식 (Slow Path)
+            
+            // Gap 모드면 기존 방식 (Slow Path) - 어쩔 수 없음
             return std::visit([this](auto const& n) { return n.at(offset); }, curr_node->data);
         }
 
         Iterator& operator++() {
             if (!curr_node) return *this;
             
-            // 크기 확인 시에도 최적화
-            size_t len = is_compact ? 
-                         std::get<CompactNode>(curr_node->data).buf.size() : 
-                         std::visit([](auto const& n) { return n.size(); }, curr_node->data);
-
             offset++;
-            if (offset >= len) {
+            
+            // [최적화] std::visit 호출 없이 캐싱된 길이와 비교
+            if (offset >= cached_len) {
                 curr_node = curr_node->next[0];
                 offset = 0;
-                update_cache(); // 노드 변경 시 캐시 갱신
+                update_cache(); // 노드가 바뀔 때만 캐시 갱신 (비용 발생)
             }
             return *this;
         }
@@ -94,7 +100,7 @@ public:
             return curr_node != other.curr_node || offset != other.offset;
         }
     };
-
+    
     Iterator begin() const { return Iterator(head->next[0], 0); }
     Iterator end() const { return Iterator(nullptr, 0); }
     
@@ -141,38 +147,44 @@ public:
 
         Node* target = find_node(pos, node_offset, update, rank);
 
+        // [리팩토링] 빈 리스트 특수 케이스 -> Early Return 처리
         if (!target) {
             if (total_size == 0) {
                 target = new Node(random_level());
-                auto& gap = std::get<GapNode>(target->data);
-                gap.insert(0, s);
+                std::get<GapNode>(target->data).insert(0, s); // GapNode임을 확신하므로 바로 접근
                 
                 for (int i = 0; i < target->level; ++i) {
-                    target->next[i] = nullptr; 
+                    // Node 생성자에서 next는 nullptr로 초기화되므로 굳이 target->next[i] = nullptr 안 해도 됨
                     head->next[i] = target;
                     head->span[i] = target->content_size(); 
                 }
+                total_size += s.size();
+                return; // 여기서 함수 종료!
             } else {
                  throw std::runtime_error("Unexpected null target on non-empty list");
             }
-        } else {
-            if (std::holds_alternative<CompactNode>(target->data)) {
-                target->data = expand(std::get<CompactNode>(target->data));
-            }
-            
-            std::get<GapNode>(target->data).insert(node_offset, s);
+        } 
+        
+        // --- 이하 일반 케이스 (else 블록 제거로 들여쓰기 감소) ---
 
-            for (int i = 0; i < MAX_LEVEL; ++i) {
-                if (update[i]) {
-                    update[i]->span[i] += s.size();
-                }
-            }
+        if (std::holds_alternative<CompactNode>(target->data)) {
+            target->data = expand(std::get<CompactNode>(target->data));
+        }
+        
+        // ... (나머지 로직 그대로)
+        std::get<GapNode>(target->data).insert(node_offset, s);
 
-            if (target->content_size() > NODE_MAX_SIZE) {
-                split_node(target, update);
+        for (int i = 0; i < MAX_LEVEL; ++i) {
+            if (update[i]) {
+                update[i]->span[i] += s.size();
             }
         }
-        total_size += s.size();
+
+        if (target->content_size() > NODE_MAX_SIZE) {
+            split_node(target, update);
+        }
+        
+        total_size += s.size(); // *주의: Early return 했으므로 여기 도달하는 건 일반 케이스뿐임
     }
 
     char at(size_t pos) const {

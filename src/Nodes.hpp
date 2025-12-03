@@ -5,6 +5,7 @@
 #include <string_view>
 #include <variant>
 #include <cstddef>
+#include <algorithm>
 
 constexpr size_t DEFAULT_GAP_SIZE = 128;   // 필요시 값 조정 (기존 값 사용)
 constexpr size_t NODE_MAX_SIZE = 4096;  // 노드 최대 크기
@@ -127,7 +128,7 @@ struct GapNode {
     void expand_buffer(size_t needed) {
         size_t old_cap = buf.size();
         // 최소 2배 혹은 필요한 만큼 + 여유분
-        size_t new_cap = old_cap * 2 + needed + DEFAULT_GAP_SIZE;
+        size_t new_cap = std::max(old_cap * 2, old_cap + needed + DEFAULT_GAP_SIZE);
         size_t back_part_size = old_cap - gap_end;
         
         std::vector<char> new_buf(new_cap);
