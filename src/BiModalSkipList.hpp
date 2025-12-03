@@ -22,6 +22,9 @@ public:
 
     ~BiModalText() {
         clear();
+        if (head) {   // 안전 장치
+            delete head; 
+        }
     }
 
     // 복사/대입 금지 (Node 구조를 복사하려면 deep copy가 필요 → 비현실적)
@@ -144,7 +147,7 @@ public:
                 auto& gap = std::get<GapNode>(target->data);
                 gap.insert(0, s);
                 
-                for (size_t i = 0; i < target->level; ++i) {
+                for (int i = 0; i < target->level; ++i) {
                     target->next[i] = nullptr; 
                     head->next[i] = target;
                     head->span[i] = target->content_size(); 
@@ -272,13 +275,24 @@ public:
 
         
     void clear() {
-        Node* curr = head;
+        if (!head) return; 
+
+        // [중요 수정] 루프 시작점은 head가 아니라 head->next[0]이어야 합니다.
+        Node* curr = head->next[0]; 
+        
         while (curr) {
             Node* next = curr->next[0];
-            delete curr;
+            delete curr; // 데이터 노드만 삭제 (279번째 줄 추정)
             curr = next;
         }
-        head = nullptr;
+
+        // head는 살아있으므로 재사용을 위해 초기화합니다.
+        // 만약 위 루프에서 curr = head 로 시작했다면, 여기서 크래시가 납니다.
+        for (int i = 0; i < MAX_LEVEL; ++i) {
+            head->next[i] = nullptr; // (286번째 줄 추정)
+            head->span[i] = 0; 
+        }
+
         total_size = 0;
     }
 
