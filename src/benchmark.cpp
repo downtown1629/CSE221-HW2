@@ -329,8 +329,7 @@ void bench_bimodal() {
 }
 
 void bench_heavy_typer() {
-    // 2MB 초기 크기 (vector에게는 지옥, BiModal에게는 평범)
-    const int LARGE_SIZE = 2 * 1024 * 1024; 
+    const int LARGE_SIZE = 2 * 1024 * 1024; // 2MB
     const int HEAVY_INSERTS = 5000;
     
     cout << "\n[Scenario C: The Heavy Typer (N=2MB, Inserts=5000)]" << endl;
@@ -338,35 +337,63 @@ void bench_heavy_typer() {
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
 
-    // 1. std::vector
+    // 1. std::vector (최악의 케이스)
     {
         vector<char> v(LARGE_SIZE, 'x');
         Timer t;
         size_t mid = v.size() / 2;
-        // 데이터가 크면 이동 비용이 막대함
         for(int i=0; i<HEAVY_INSERTS; ++i) v.insert(v.begin() + mid, 'A');
-        cout << left << setw(18) << "std::vector" << setw(15) << t.elapsed_ms() << "(Very Slow)" << endl;
+        cout << left << setw(18) << "std::vector" << setw(15) << t.elapsed_ms() << "(Shift Hell)" << endl;
     }
 
-    // 2. BiModalText
+    // 2. std::deque (Vector보다 낫지만 여전히 느림)
+    {
+        deque<char> d(LARGE_SIZE, 'x');
+        Timer t;
+        size_t mid = d.size() / 2;
+        for(int i=0; i<HEAVY_INSERTS; ++i) d.insert(d.begin() + mid, 'A');
+        cout << left << setw(18) << "std::deque" << setw(15) << t.elapsed_ms() << "(Still Slow)" << endl;
+    }
+
+    // 3. SimpleGapBuffer (이상적인 상황 - 커서 고정)
+    {
+        SimpleGapBuffer gb(LARGE_SIZE + HEAVY_INSERTS);
+        gb.insert(0, string(LARGE_SIZE, 'x'));
+        gb.move_gap(LARGE_SIZE / 2); // 미리 이동 (공정한 비교)
+        
+        Timer t;
+        for(int i=0; i<HEAVY_INSERTS; ++i) gb.insert(gb.size() / 2, 'A'); // Gap 이동 없음
+        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << t.elapsed_ms() << "(Fastest)" << endl;
+    }
+
+    // 4. Rope
+#if ROPE_AVAILABLE
+    {
+        crope r(LARGE_SIZE, 'x');
+        Timer t;
+        size_t mid = r.size() / 2;
+        for(int i=0; i<HEAVY_INSERTS; ++i) r.insert(mid, "A");
+        cout << left << setw(18) << "SGI Rope" << setw(15) << t.elapsed_ms() << "(Consistent)" << endl;
+    }
+#endif
+
+    // 5. BiModalText
     {
         BiModalText bmt;
-        // 2MB 데이터 생성 (1KB * 2048)
         string chunk(1024, 'x');
-        for(int i=0; i<2048; ++i) bmt.insert(bmt.size(), chunk);
+        for(int i=0; i<2048; ++i) bmt.insert(bmt.size(), chunk); // 2MB
         bmt.optimize(); 
 
         Timer t;
         size_t mid = bmt.size() / 2;
-        // Gap Buffer 덕분에 파일 크기와 무관하게 빠름
         for(int i=0; i<HEAVY_INSERTS; ++i) bmt.insert(mid, "A");
-        cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Consistent)" << endl;
+        cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Competitive)" << endl;
     }
 }
 
 void bench_deletion() {
     const int INITIAL_N = 500000;
-    const int DELETE_OPS = 10000; // 1글자씩 1만 번 삭제
+    const int DELETE_OPS = 10000; 
 
     cout << "\n[Scenario D: The Backspacer (Backspace 10k times)]" << endl;
     cout << "--------------------------------------------------------------" << endl;
@@ -378,26 +405,33 @@ void bench_deletion() {
         vector<char> v(INITIAL_N, 'x');
         size_t pos = v.size() / 2;
         Timer t;
-        for(int i=0; i<DELETE_OPS; ++i) {
-            v.erase(v.begin() + pos); // 뒤쪽 데이터를 전부 당겨옴 O(N)
-        }
-        cout << left << setw(18) << "std::vector" << setw(15) << t.elapsed_ms() << "(Shift overhead)" << endl;
+        for(int i=0; i<DELETE_OPS; ++i) v.erase(v.begin() + pos);
+        cout << left << setw(18) << "std::vector" << setw(15) << t.elapsed_ms() << "(Shift)" << endl;
     }
 
-    // 2. std::list
+    // 2. std::list (삭제 최강자)
     {
         list<char> l(INITIAL_N, 'x');
         auto it = l.begin();
-        advance(it, l.size() / 2); // 위치 찾기
-        
+        advance(it, l.size() / 2);
         Timer t;
-        for(int i=0; i<DELETE_OPS; ++i) {
-            it = l.erase(it); // 삭제 자체는 O(1)
-        }
-        cout << left << setw(18) << "std::list" << setw(15) << t.elapsed_ms() << "(Fast Erase)" << endl;
+        for(int i=0; i<DELETE_OPS; ++i) it = l.erase(it);
+        cout << left << setw(18) << "std::list" << setw(15) << t.elapsed_ms() << "(O(1))" << endl;
     }
 
-    // 3. BiModalText
+    // 3. Rope
+#if ROPE_AVAILABLE
+    {
+        crope r(INITIAL_N, 'x');
+        size_t pos = r.size() / 2;
+        Timer t;
+        // Rope 삭제: erase(pos, len)
+        for(int i=0; i<DELETE_OPS; ++i) r.erase(pos, 1);
+        cout << left << setw(18) << "SGI Rope" << setw(15) << t.elapsed_ms() << "(Tree Rebal)" << endl;
+    }
+#endif
+
+    // 4. BiModalText
     {
         BiModalText bmt;
         for(int i=0; i<INITIAL_N/1000; ++i) bmt.insert(0, string(1000, 'x'));
@@ -405,10 +439,9 @@ void bench_deletion() {
 
         size_t pos = bmt.size() / 2;
         Timer t;
-        for(int i=0; i<DELETE_OPS; ++i) {
-            bmt.erase(pos, 1); // Gap 확장으로 논리적 삭제
-        }
-        cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Logical Del)" << endl;
+        // BiModal 삭제: erase(pos, len)
+        for(int i=0; i<DELETE_OPS; ++i) bmt.erase(pos, 1);
+        cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Gap Expand)" << endl;
     }
 }
 
@@ -416,44 +449,78 @@ void bench_mixed_workload() {
     const int N = 200000;
     const int ITERATIONS = 1000; 
 
-    cout << "\n[Scenario E: The Refactorer (Scan & Edit)]" << endl;
+    cout << "\n[Scenario E: The Refactorer (Random Read & Edit)]" << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
 
-    // 1. std::string (Reference)
+    // 1. std::string (비교 기준)
     {
         string s(N, 'x');
+        long long sum = 0;
         Timer t;
         for(int i=0; i<ITERATIONS; ++i) {
-            // 1. 검색 (Simulation: Access random index)
-            char c = s[i * 100 % s.size()]; 
-            dummy_checksum += c; // <-- 이 줄 추가 (volatile 없애도 됨)
-
-            // 2. 수정
-            s.insert(i * 100 % s.size(), "A");
+            size_t pos = (i * 1234) % s.size(); // Random-like
+            char c = s[pos]; // Read O(1)
+            sum += c;
+            s.insert(pos, "A"); // Write O(N)
         }
-        cout << left << setw(18) << "std::string" << setw(15) << t.elapsed_ms() << "(Baseline)" << endl;
+        cout << left << setw(18) << "std::string" << setw(15) << t.elapsed_ms() << "(Fast Read)" << endl;
+        dummy_checksum += sum;
     }
 
-    // 2. BiModalText
+    // 2. SimpleGapBuffer (이동 비용 큼)
+    {
+        SimpleGapBuffer gb(N + ITERATIONS);
+        gb.insert(0, string(N, 'x'));
+        long long sum = 0;
+        Timer t;
+        for(int i=0; i<ITERATIONS; ++i) {
+            size_t pos = (i * 1234) % gb.size();
+            char c = gb.at(pos); // Read O(1)
+            sum += c;
+            gb.insert(pos, 'A'); // Write O(N) Gap Move
+        }
+        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << t.elapsed_ms() << "(Gap Thrash)" << endl;
+        dummy_checksum += sum;
+    }
+
+    // 3. Rope
+#if ROPE_AVAILABLE
+    {
+        crope r(N, 'x');
+        long long sum = 0;
+        Timer t;
+        for(int i=0; i<ITERATIONS; ++i) {
+            size_t pos = (i * 1234) % r.size();
+            char c = r[pos]; // Read O(log N) - 조금 느릴 수 있음
+            sum += c;
+            r.insert(pos, "A"); // Write O(log N)
+        }
+        cout << left << setw(18) << "SGI Rope" << setw(15) << t.elapsed_ms() << "(Balanced)" << endl;
+        dummy_checksum += sum;
+    }
+#endif
+
+    // 4. BiModalText
     {
         BiModalText bmt;
         string chunk(1000, 'x');
         for(int i=0; i<N/1000; ++i) bmt.insert(0, chunk);
         bmt.optimize();
 
+        long long sum = 0;
         Timer t;
         for(int i=0; i<ITERATIONS; ++i) {
-            // 1. 검색 (at 함수 사용 - Log N)
-            char c = bmt.at(i * 100 % bmt.size());
-            dummy_checksum += c; // <-- 이 줄 추가 (volatile 없애도 됨)
-
-            // 2. 수정 (Insert - Log N + O(1))
-            // *주의: 빈번한 모드 전환이 일어날 수 있음
-            bmt.insert(i * 100 % bmt.size(), "A");
+            size_t pos = (i * 1234) % bmt.size();
+            // Read: O(log N) via optimized at()
+            char c = bmt.at(pos); 
+            sum += c;
+            // Write: O(log N) search + O(1) insert
+            bmt.insert(pos, "A");
         }
         cout << left << setw(18) << "BiModalText" << setw(15) << t.elapsed_ms() << "(Balanced)" << endl;
+        dummy_checksum += sum;
     }
 }
 
