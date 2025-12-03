@@ -392,13 +392,22 @@ private:
             node_offset = pos - accumulated;
             while (target && node_offset >= target->content_size()) {
                 if (!target->next[0]) break; 
+                
                 accumulated += target->content_size();
+                
+                // --- [ASan Memory Leak Fix] ---
+                // 노드를 건너뛸 때 update 배열(선행 노드)도 갱신해야 split_node에서 링크가 끊어지지 않음
+                update[0] = target;
+                rank[0] = accumulated; 
+                // ------------------------------
+
                 target = target->next[0];
                 node_offset = pos - accumulated;
             }
         }
         return target;
     }
+  
 
     
     void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
