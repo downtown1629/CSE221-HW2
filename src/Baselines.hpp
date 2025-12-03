@@ -6,6 +6,72 @@
 #include <algorithm>
 #include <cstring>
 
+// =========================================================
+//  Utility: Simple Gap Buffer (Baseline)
+// =========================================================
+class SimpleGapBuffer {
+    std::vector<char> buf;
+    size_t gap_start;
+    size_t gap_end;
+
+public:
+    SimpleGapBuffer(size_t initial_size = 1024) {
+        buf.resize(initial_size);
+        gap_start = 0;
+        gap_end = initial_size;
+    }
+
+    size_t size() const { return buf.size() - (gap_end - gap_start); }
+
+    void move_gap(size_t pos) {
+        if (pos == gap_start) return;
+        char* ptr = buf.data();
+        
+        if (pos > gap_start) {
+            size_t dist = pos - gap_start;
+            std::memmove(ptr + gap_start, ptr + gap_end, dist);
+            gap_start += dist;
+            gap_end += dist;
+        } else {
+            size_t dist = gap_start - pos;
+            std::memmove(ptr + gap_end - dist, ptr + pos, dist);
+            gap_start -= dist;
+            gap_end -= dist;
+        }
+    }
+
+    void insert(size_t pos, char c) {
+        if (pos > size()) pos = size();
+        move_gap(pos);
+        if (gap_start == gap_end) expand(1024);
+        buf[gap_start++] = c;
+    }
+    
+    void insert(size_t pos, std::string_view s) {
+        if (pos > size()) pos = size();
+        move_gap(pos);
+        if (gap_end - gap_start < s.size()) expand(s.size());
+        std::memcpy(buf.data() + gap_start, s.data(), s.size());
+        gap_start += s.size();
+    }
+
+    char at(size_t i) const {
+        return (i < gap_start) ? buf[i] : buf[i + (gap_end - gap_start)];
+    }
+
+private:
+    void expand(size_t needed) {
+        size_t old_cap = buf.size();
+        size_t new_cap = std::max(old_cap * 2, old_cap + needed);
+        std::vector<char> new_buf(new_cap);
+        size_t back_len = old_cap - gap_end;
+        std::memcpy(new_buf.data(), buf.data(), gap_start);
+        std::memcpy(new_buf.data() + new_cap - back_len, buf.data() + gap_end, back_len);
+        buf = std::move(new_buf);
+        gap_end = new_cap - back_len;
+    }
+};
+
 // Piece: 원본(ORIGINAL) 혹은 추가(ADD) 버퍼의 특정 구간을 가리킴
 struct Piece {
     enum Source { ORIGINAL, ADD };
@@ -143,3 +209,4 @@ public:
         return '\0';
     }
 };
+
