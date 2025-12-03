@@ -3,7 +3,7 @@
 #include <array>
 #include <random>
 #include <cassert>
-#include "Nodes.hpp"   // 방금 만든 노드 헤더
+#include "Nodes.hpp"
 
 // 스킵 리스트용 상수들
 constexpr int MAX_LEVEL = 16;
@@ -405,12 +405,21 @@ private:
         auto& u_gap = std::get<GapNode>(u->data);
         
         // 1. 분할 크기 계산
+        //
+        //  - total_size: 현재 노드 u가 가지고 있는 전체 문자 수
+        //  - split_point: 앞쪽에 남길 문자 수
+        //  - v_size: 뒤쪽으로 분리해서 새 노드 v로 옮길 문자 수
+        //
         size_t total_size = u_gap.size();
         size_t split_point = total_size / 2;
         size_t v_size = total_size - split_point;
         
         // 2. [중요] 새로운 노드 'v' 먼저 생성
-        // 여기서 예외가 발생해도 기존 노드 'u'는 건드리지 않았으므로 안전함
+        //
+        //  - split 과정에서 예외가 발생할 수 있으므로,
+        //    u의 구조를 건드리기 전에 v를 먼저 안전하게 생성한다.
+        //  - new_level은 u의 level을 넘지 않도록 clamp 한다.
+        //
         int u_levels = u->level;
         int new_level = random_level();
         if (new_level > u_levels) new_level = u_levels;
@@ -419,34 +428,112 @@ private:
         
         try {
             // 3. split_right()를 사용하여 u에서 v로 데이터 이동
-            // split_right()는 u_gap을 직접 수정하고 뒷부분을 반환함
+            //
+            //  - split_right(v_size)는 "오른쪽 v_size 만큼"을 잘라내서 반환한다.
+            //  - 호출 후:
+            //      * u_gap : [앞부분 split_point 문자]만 남도록 내부 버퍼가 변경됨
+            //      * 반환값 : [뒷부분 v_size 문자]를 담은 GapNode
+            //  - 그 반환값을 v_gap에 대입해서 새 노드 v의 데이터로 사용한다.
+            //
             auto& v_gap = std::get<GapNode>(v->data);
             v_gap = u_gap.split_right(v_size);
             // 이 시점에서:
-            // - u_gap은 앞부분(split_point 길이)만 가짐 + 최적화된 버퍼
-            // - v_gap은 뒷부분(v_size 길이)을 가짐
+            //  - u_gap.size() == split_point
+            //  - v_gap.size() == v_size
         } catch (...) {
-            delete v;  // 생성하다 실패하면 v 정리 후 예외 다시 던짐
+            // v 생성 이후 split 과정에서 예외가 나면
+            // v를 정리한 뒤 예외를 그대로 다시 던져서 상위에서 처리하게 한다.
+            delete v;
             throw;
         }
         
-        // --- 이 시점부터는 예외가 발생하지 않음 (No-Throw Section) ---
+        // --- 이 시점부터는 예외가 발생하지 않는다고 가정 (No-Throw Section) ---
+        //     포인터/스팬 갱신 중에 예외가 터지면 skip list의 불변식이 깨질 수 있으므로,
+        //     그 이전에 예외 가능성이 있는 작업(split_right, 할당 같은 것들)을 모두 끝낸다.
         
-        // 4. 포인터 연결 (Linkage Update)
+        // 4. 포인터 및 span 갱신 (Linkage & Span Update)
+        //
+        // [span의 의미 요약]
+        //  - 이 구현에서 span[i] 는 "해당 레벨 i에서, 이 포인터를 한 번 따라갔을 때
+        //    텍스트 상에서 건너뛰는 문자 수"를 뜻한다.
+        //  - 즉, x->span[i] 는 "x에서 x->next[i] (그리고 그 사이에 묶여 있는 노드들)을
+        //    통해 한 번에 점프하는 전체 길이"라고 볼 수 있다.
+        //  - find_node 에서:
+        //
+        //      while (x->next[i] && (accumulated + x->span[i] < pos)) {
+        //          accumulated += x->span[i];
+        //          x = x->next[i];
+        //      }
+        //
+        //    이런 식으로 사용되므로, 각 레벨에서 "점프 거리"만 맞게 유지하면
+        //    전체 인덱스 계산이 일관된다.
+        //
+        // [불변식]
+        //  - split 전/후에도 "어떤 노드에서 더 먼 노드까지의 총 점프 거리"는
+        //    그대로 유지되어야 한다.
+        //  - 아래 span 갱신은 이 불변식을 지키기 위한 것이다.
+        //
         for (int i = 0; i < MAX_LEVEL; ++i) {
+            // update[i]는 "레벨 i에서 u 바로 앞에 있는 노드"를 의미한다.
+            // 일부 레벨에서는 u가 존재하지 않을 수 있으므로 필터링한다.
             if (!update[i] || update[i]->next[i] != u) continue;
             
-            // update[i]에서 u의 끝까지의 거리가 v_size만큼 줄어듦
+            // [중요 포인트: update[i]->span[i] -= v_size 가 필요한 이유]
+            //
+            //  - split 전 (레벨 i):
+            //      update[i] --(span = S)--> u --(span = U)--> ...
+            //    라고 하면, update[i] 에서 그 다음-next... 를 따라가며
+            //    도달하는 어떤 노드까지의 총 점프 거리는 S + U 라고 할 수 있다.
+            //
+            //  - split 후에는 u가 [앞부분], v가 [뒷부분]을 가지며,
+            //    레벨 i 에서 v를 "사이에 끼우는" 경우:
+            //
+            //      update[i] --(S - v_size)--> u --(v_size)--> v --(U)--> ...
+            //
+            //    가 되어야 전체 거리가 (S - v_size) + v_size + U = S + U 로 보존된다.
+            //
+            //  - 만약 여기에서 v_size 를 빼지 않으면:
+            //      update[i] --(S)--> u --(v_size)--> v --(U)--> ...
+            //    합이 S + v_size + U 가 되어, split 전보다 v_size 만큼 더 길어져
+            //    인덱스 계산이 틀어지게 된다.
+            //
+            //  - 따라서 "u에서 뒤쪽 v_size 만큼을 떼어냈다"는 사실을
+            //    update[i] 쪽 span 에서도 반영해야 한다.
+            //
             update[i]->span[i] -= v_size;
             
             if (i < new_level) {
-                // Level i에서 v가 존재하는 경우: u -> v -> next 형태로 연결
+                // [케이스 1] 이 레벨에서 v가 실제로 존재하는 경우
+                //
+                //   (split 전)
+                //      update[i] --S--> u --U--> next
+                //
+                //   (split 후)
+                //      update[i] --(S - v_size)--> u --(v_size)--> v --(U)--> next
+                //
+                //   - u->span[i] 에는 "u에서 v까지의 거리" = v_size 를 기록한다.
+                //   - v->span[i] 에는 "v에서 그 다음 노드까지의 거리"로 기존 u->span[i]
+                //     ( = U )를 그대로 넘겨준다.
+                //
                 v->next[i] = u->next[i];
                 u->next[i] = v;
-                v->span[i] = u->span[i];  // v에서 다음까지는 기존 u의 span
-                u->span[i] = v_size;       // u에서 v까지는 v의 크기
+                v->span[i] = u->span[i];  // v에서 다음까지의 거리 = 기존 u의 거리(U)
+                u->span[i] = v_size;      // u에서 v까지의 거리 = v의 문자 수
             } else {
-                // Level i에서 v가 없는 경우: u가 v를 건너뜀
+                // [케이스 2] 이 레벨에서 v는 존재하지 않는 경우
+                //
+                //   (split 전)
+                //      update[i] --S--> u --U--> next
+                //
+                //   (split 후, 레벨 i 기준에서는 v를 "건너뛰는" 구조)
+                //      update[i] --(S - v_size)--> u --(U + v_size)--> next
+                //
+                //   - 여기서는 레벨 i에서 v를 따로 노출하지 않으므로
+                //     u->span[i] 하나가 u + v 를 모두 커버해야 한다.
+                //   - 그래서 u->span[i] 에 v_size 를 더해서 전체 거리를 맞춘다.
+                //
+                //   총합: (S - v_size) + (U + v_size) = S + U (불변식 유지)
+                //
                 u->span[i] += v_size;
             }
         }
