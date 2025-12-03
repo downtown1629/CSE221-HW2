@@ -49,6 +49,8 @@ void bench_vector() {
     // B. Reading Phase (전체 순회)
     t.reset();
     for (char c : v) checksum += c;
+    if (checksum == 123456789) std::cout << ""; // 루프 삭제 방지를 위한 더미 출력 조건 (실행될 필요는 없음)
+
     double time_read = t.elapsed_ms();
 
     cout << left << setw(15) << "std::vector" 
@@ -79,6 +81,8 @@ void bench_list() {
     // B. Reading Phase
     t.reset();
     for (char c : l) checksum += c;
+    if (checksum == 123456789) std::cout << ""; // 루프 삭제 방지를 위한 더미 출력 조건 (실행될 필요는 없음)
+
     double time_read = t.elapsed_ms();
 
     cout << left << setw(15) << "std::list" 

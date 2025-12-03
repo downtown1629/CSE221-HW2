@@ -6,6 +6,7 @@
 #include <variant>
 #include <cstddef>
 #include <algorithm>
+#include <cstring>
 
 constexpr size_t DEFAULT_GAP_SIZE = 128;   // 필요시 값 조정 (기존 값 사용)
 constexpr size_t NODE_MAX_SIZE = 4096;  // 노드 최대 크기
@@ -74,23 +75,25 @@ struct GapNode {
     void move_gap(size_t target_logical_idx) {
         if (target_logical_idx == gap_start) return;
 
+        char* ptr = buf.data(); // Raw pointer 획득
+
         if (target_logical_idx > gap_start) {
             // Gap을 오른쪽으로 이동 (데이터를 왼쪽으로 복사)
-            // [Data A][Gap][Data B] -> [Data A][Data B_part][Gap]
             size_t dist = target_logical_idx - gap_start;
-            std::copy(buf.begin() + gap_end, 
-                      buf.begin() + gap_end + dist, 
-                      buf.begin() + gap_start);
+            // [최적화] memmove 사용 (Overlap 안전)
+            // Destination: 기존 Gap의 시작점 (buf.begin() + gap_start)
+            // Source: Gap 바로 뒤의 데이터 (buf.begin() + gap_end)
+            std::memmove(ptr + gap_start, ptr + gap_end, dist);
+            
             gap_start += dist;
             gap_end += dist;
         } else {
             // Gap을 왼쪽으로 이동 (데이터를 오른쪽으로 복사)
-            // [Data A][Gap] -> [Data A_part][Gap][Data A_rest]
             size_t dist = gap_start - target_logical_idx;
-            // 겹치는 영역 안전 처리를 위해 copy_backward 사용 권장
-            std::copy_backward(buf.begin() + target_logical_idx, 
-                               buf.begin() + gap_start, 
-                               buf.begin() + gap_end);
+            // Destination: 이동할 위치의 Gap 끝부분 (buf.begin() + gap_end - dist)
+            // Source: 이동할 데이터의 시작점 (buf.begin() + target_logical_idx)
+            std::memmove(ptr + gap_end - dist, ptr + target_logical_idx, dist);
+            
             gap_start -= dist;
             gap_end -= dist;
         }
@@ -224,8 +227,8 @@ CompactNode compact(const GapNode& g) {
     // Gap 뒷부분 복사
     c.buf.insert(c.buf.end(), g.buf.begin() + g.gap_end, g.buf.end());
     
-    // (선택 사항) 메모리 꼭 맞게 줄이기
-    // c.buf.shrink_to_fit(); 
+    // 불필요한 용량 제거
+    c.buf.shrink_to_fit(); 
     
     return c;
 }
@@ -245,26 +248,20 @@ private:
 
 public:
     Node(int lvl) : data(GapNode{}), level(lvl), memory_block(nullptr) {
-        // 1. 필요한 전체 메모리 크기 계산
-        // next 배열 크기 + span 배열 크기
+        // 1. 크기 계산
         size_t next_size = sizeof(Node*) * lvl;
         size_t span_size = sizeof(size_t) * lvl;
         
-        // 2. 한 번에 할당 (Single Allocation)
-        // char*로 할당하여 바이트 단위 포인터 연산 가능하게 함
+        // 2. 단일 할당
         memory_block = new char[next_size + span_size];
 
-        // 3. 포인터 연결 (Placement)
-        // 앞부분은 next 배열로 사용
+        // 3. 포인터 연결
         next = reinterpret_cast<Node**>(memory_block);
-        
-        // 뒷부분은 span 배열로 사용
-        // (memory_block 시작 주소 + next 배열 크기) 위치부터 시작
         span = reinterpret_cast<size_t*>(memory_block + next_size);
 
-        // 4. 초기화
-        std::fill(next, next + lvl, nullptr);
-        std::fill(span, span + lvl, 0);
+        // 4. [최적화] 한 번에 0으로 초기화 (nullptr == 0 가정)
+        // next 배열은 nullptr로, span 배열은 0으로 초기화됨
+        std::memset(memory_block, 0, next_size + span_size);
     }
 
     ~Node() {

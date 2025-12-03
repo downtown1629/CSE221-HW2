@@ -454,9 +454,12 @@ private:
 
     
     void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
-        for (int i = 0; i < MAX_LEVEL; ++i) {
+        for (int i = 0; i < target->level; ++i) {
+            // update[i]는 target의 선행 노드입니다.
+            // target이 존재하는 레벨에서만 링크를 갱신하면 됩니다.
             if (update[i]->next[i] == target) {
                 update[i]->next[i] = target->next[i];
+                // 삭제되는 노드의 span(다음 노드까지 거리)을 선행 노드에 합칩니다.
                 update[i]->span[i] += target->span[i];
             }
         }
