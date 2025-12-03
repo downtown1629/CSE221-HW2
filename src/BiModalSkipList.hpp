@@ -343,7 +343,7 @@ private:
 
     int random_level() {
         int lvl = 1;
-        while (dist(gen) < 0.5 && lvl < MAX_LEVEL) lvl++;
+        while (dist(gen) < P && lvl < MAX_LEVEL) lvl++;
         return lvl;
     }
 
@@ -379,60 +379,59 @@ private:
         return target;
     }
 
+    
     void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
-        // 1. 데이터 백업 및 분할 준비 (여기서 실패하면 아무 일도 안 일어남)
         auto& u_gap = std::get<GapNode>(u->data);
-        std::string full_str = u_gap.to_string(); // 메모리 할당 발생 가능
         
-        size_t split_point = full_str.size() / 2;
-        std::string s1 = full_str.substr(0, split_point);
-        std::string s2 = full_str.substr(split_point);
-        size_t v_size = s2.size();
-
-        // 2. [중요] 새로운 노드 'v' 먼저 생성 (Resource Acquisition)
-        // 여기서 예외가 발생해도, 기존 노드 'u'는 건드리지 않았으므로 안전함.
+        // 1. 분할 크기 계산
+        size_t total_size = u_gap.size();
+        size_t split_point = total_size / 2;
+        size_t v_size = total_size - split_point;
+        
+        // 2. [중요] 새로운 노드 'v' 먼저 생성
+        // 여기서 예외가 발생해도 기존 노드 'u'는 건드리지 않았으므로 안전함
         int u_levels = u->level;
         int new_level = random_level();
         if (new_level > u_levels) new_level = u_levels;
-
-        // new Node가 bad_alloc을 던지면 함수가 종료되지만 데이터는 무사함
-        Node* v = new Node(new_level); 
         
-        // v에 데이터 채우기 (여기서 예외 나도 v만 leak 되고 u는 안전 - 스마트 포인터가 없으므로 v 해제 처리는 필요하지만 데이터 유실은 아님)
-        // 엄밀한 처리를 위해 try-catch로 v 삭제를 감싸주면 더 좋지만, 
-        // 최소한 u의 데이터가 날아가는 것은 방지됨.
+        Node* v = new Node(new_level);
+        
         try {
+            // 3. split_right()를 사용하여 u에서 v로 데이터 이동
+            // split_right()는 u_gap을 직접 수정하고 뒷부분을 반환함
             auto& v_gap = std::get<GapNode>(v->data);
-            v_gap.insert(0, s2);
+            v_gap = u_gap.split_right(v_size);
+            // 이 시점에서:
+            // - u_gap은 앞부분(split_point 길이)만 가짐 + 최적화된 버퍼
+            // - v_gap은 뒷부분(v_size 길이)을 가짐
         } catch (...) {
-            delete v; // 생성하다 실패하면 v 정리 후 예외 다시 던짐
+            delete v;  // 생성하다 실패하면 v 정리 후 예외 다시 던짐
             throw;
         }
-
-        // --- 이 시점부터는 메모리 할당이 없으므로 예외가 발생하지 않음 (No-Throw Section) ---
-
-        // 3. 기존 노드 'u' 수정 (이제 안전하게 자를 수 있음)
-        u_gap = GapNode(128); // 기존 버퍼 해제 및 새 버퍼 할당 (작은 크기라 실패 확률 낮음)
-        // 만약 여기서 실패해도 s2는 v에 살아있으므로 복구 가능성은 있지만, 
-        // GapNode 이동 생성자를 활용하면 더 안전함. 여기선 간단히 진행.
-        u_gap.insert(0, s1);
-
+        
+        // --- 이 시점부터는 예외가 발생하지 않음 (No-Throw Section) ---
+        
         // 4. 포인터 연결 (Linkage Update)
         for (int i = 0; i < MAX_LEVEL; ++i) {
             if (!update[i] || update[i]->next[i] != u) continue;
             
+            // update[i]에서 u의 끝까지의 거리가 v_size만큼 줄어듦
             update[i]->span[i] -= v_size;
-
+            
             if (i < new_level) {
+                // Level i에서 v가 존재하는 경우: u -> v -> next 형태로 연결
                 v->next[i] = u->next[i];
                 u->next[i] = v;
-                v->span[i] = u->span[i]; 
-                u->span[i] = v_size;    
+                v->span[i] = u->span[i];  // v에서 다음까지는 기존 u의 span
+                u->span[i] = v_size;       // u에서 v까지는 v의 크기
             } else {
+                // Level i에서 v가 없는 경우: u가 v를 건너뜀
                 u->span[i] += v_size;
             }
         }
     }
+
+    
     void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
         for (int i = 0; i < MAX_LEVEL; ++i) {
             if (update[i]->next[i] == target) {

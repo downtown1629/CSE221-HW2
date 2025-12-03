@@ -30,8 +30,5 @@ clean:
 .PHONY: all run clean
 
 debug: $(TARGET)
-
-# 실행 파일 빌드 규칙
-# benchmark.cpp를 컴파일하여 main 실행 파일을 생성합니다.
-$(TARGET): $(SOURCES)
+	$(TARGET): $(SOURCES)
 	$(CXX) $(DEBUGFLAGS) -o $(TARGET) $(SOURCES)
