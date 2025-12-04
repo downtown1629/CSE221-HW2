@@ -196,25 +196,43 @@ public:
     }
 
     char at(size_t pos) const {
-        if (pos >= total_size) throw std::out_of_range("Index out of range");
-        
-        // 직접 인라인 탐색 - 가장 간단하고 빠름
-        Node* x = head;
-        size_t accumulated = 0;
-        
-        for (int i = MAX_LEVEL - 1; i >= 0; --i) {
-            while (x->next[i] && (accumulated + x->span[i] <= pos)) {
-                accumulated += x->span[i];
-                x = x->next[i];
-            }
+    if (pos >= total_size) throw std::out_of_range("Index out of range");
+
+    Node* x = head;
+    size_t accumulated = 0;
+    for (int i = MAX_LEVEL - 1; i >= 0; --i) {
+        while (x->next[i] && (accumulated + x->span[i] <= pos)) {  // ✅ <= 통일
+            accumulated += x->span[i];
+            x = x->next[i];
         }
-        
-        Node* target = x->next[0];
-        if (!target) throw std::runtime_error("Node structure corruption");
-        
-        size_t offset = pos - accumulated;
-        return std::visit([offset](auto const& n) { return n.at(offset); }, target->data);
     }
+
+    Node* target = x->next[0];
+    if (!target) {
+#ifdef BIMODAL_DEBUG
+        debug_dump_structure(std::cerr);
+#endif
+        throw std::runtime_error("Node structure corruption");
+    }
+
+    size_t offset = pos - accumulated;
+    // ✅ NEW: find_node 동일 skip 루프 (boundary off==sz → next off=0)
+    while (target && offset >= target->content_size()) {
+        accumulated += target->content_size();
+        target = target->next[0];
+        offset = pos - accumulated;
+    }
+    if (!target || offset >= target->content_size()) {
+#ifdef BIMODAL_DEBUG
+        std::cerr << "Final OOB: off=" << offset << " >= sz=" << target->content_size() << "\n";
+        debug_dump_structure(std::cerr);
+#endif
+        throw std::runtime_error("Final offset OOB");
+    }
+
+    return std::visit([offset](auto const& n) { return n.at(offset); }, target->data);
+}
+
 
     // Iterator를 타지 않고, 노드 내부 버퍼를 통째로 append 하여 대역폭 활용 극대화
     std::string to_string() const {
@@ -284,7 +302,7 @@ public:
 
                 // 3. Span 업데이트
                 // 현재 노드의 span에 사라지는 노드의 span(크기)을 더함
-                curr->span[0] += next_node->span[0];
+                curr->span[0] = next_node->span[0];
 
                 // 4. 메모리 해제
                 delete next_node;
@@ -296,6 +314,27 @@ public:
             } else {
                 // 병합하지 않았다면 다음 노드로 이동
                 curr = next_node;
+            }
+        }
+        // ✅ NEW: Level-0 spans 강제 동기화 (merge 후 content 변함)
+        Node* pred = head;
+        Node* node = head->next[0];
+        while (node) {
+            pred->span[0] = node->content_size();
+            pred = node;
+            node = node->next[0];
+        }
+        if (pred) pred->span[0] = 0;  // 마지막 노드 span[0]=0
+
+        // ✅ NEW: higher spans 재계산 (O(#nodes * MAX_LEVEL) 빠름)
+
+        for (int lvl = 1; lvl < MAX_LEVEL; ++lvl) {
+            Node* x = head;
+            while (x->next[lvl]) {
+                Node* tgt = x->next[lvl];
+                // span[lvl] = tgt content + tgt의 하위 jump span (subtree sum)
+                x->span[lvl] = tgt->content_size() + tgt->span[lvl];
+                x = tgt;
             }
         }
     }
@@ -558,13 +597,14 @@ private:
 
     
     void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
+        if (!target) return;  // ✅ null 안전
+
         for (int i = 0; i < target->level; ++i) {
             // update[i]는 target의 선행 노드입니다.
             // target이 존재하는 레벨에서만 링크를 갱신하면 됩니다.
-            if (update[i]->next[i] == target) {
+            if (update[i] && update[i]->next[i] == target) {
                 update[i]->next[i] = target->next[i];
-                // 삭제되는 노드의 span(다음 노드까지 거리)을 선행 노드에 합칩니다.
-                update[i]->span[i] += target->span[i];
+                update[i]->span[i] = target->span[i];
             }
         }
         delete target;
@@ -575,6 +615,7 @@ private:
 
 #ifdef BIMODAL_DEBUG
 void BiModalText::debug_verify_spans(std::ostream& os) const {
+    
     // 1) level 0에서 content_size 합 == total_size?
     size_t sum0 = 0;
     const Node* curr = head->next[0];
@@ -588,6 +629,7 @@ void BiModalText::debug_verify_spans(std::ostream& os) const {
 
     // 2) 각 레벨 span 합 == total_size?
     for (int lvl = 0; lvl < MAX_LEVEL; ++lvl) {
+        if (!head->next[lvl]) continue;  // ✅ 고레벨 구조 없음 → skip
         size_t acc = 0;
         const Node* x = head;
         while (x->next[lvl]) {
