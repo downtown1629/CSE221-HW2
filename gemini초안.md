@@ -56,9 +56,28 @@ Node(int lvl) {
  * Lazy Merge Strategy: 삭제 연산으로 인해 작아진 노드들을 즉시 병합(Eager Merge)하는 대신, optimize() 호출 시점에 일괄 병합하는 지연 전략을 적용했다. 이는 텍스트 편집기에서 빈번한 백스페이스 입력 시 발생하는 불필요한 메모리 병합 레이턴시를 방지하여 쓰기 처리량(Throughput)을 유지하고, 이후 분석 단계에서는 파편화가 해소된 Compact Node를 제공하여 최적의 읽기 성능을 달성하도록 한다.
 
 
-### 2.4 Zero-Overhead Iterator
+### 2.4 Zero-Overhead Iterator & SIMD Scan
 
-순회 성능을 높이기 위해 Iterator 내부에 현재 노드의 데이터 포인터와 길이를 캐싱(`cached_ptr`, `cached_len`)했다. 이를 통해 반복문 수행 시마다 발생하는 `std::visit`의 가상 함수 오버헤드를 제거하고, 포인터 연산만으로 데이터를 읽을 수 있게 최적화했다.
+`src/BiModalSkipList.hpp`의 Iterator는 현재 노드의 데이터 포인터와 길이를 캐싱(`cached_ptr`, `cached_len`)하여, 반복문마다 `std::visit`을 호출하는 비용을 제거한다. CompactNode라면 `cached_ptr[offset]`으로 즉시 접근하고, GapNode는 `at()`으로 폴백한다. 또한 내부 `scan(Func)` 루틴은 노드당 한 번만 `std::visit`을 수행한 뒤 `for` 루프에서 연속 데이터를 제공하므로, 컴파일러가 `func`를 적극적으로 인라인·벡터화할 수 있다. 이 조합 덕분에 `std::vector` 수준의 순차 읽기 대역폭을 유지하면서도 Skip List의 위치 기반 편집 이점을 살렸다.
+
+### 2.5 Deterministic Span Maintenance
+
+최근 수정에서는 모든 변이 연산 뒤에 `rebuild_spans()`를 호출하여 스팬 메타데이터를 항상 레벨 0 순서에서 재계산한다. 과거에는 각 연산에서 국소적으로 `span`을 조정했지만, 노드 분할·병합이 겹치면 누적 오차가 생겨 `at()`과 Iterator 사이가 어긋났다. 이제는
+
+1. `find_node()`가 `update`/`rank` 배열을 채워 안전하게 분할 동작을 준비하고,
+2. `split_node()`와 `remove_node()`가 연결 정보를 갱신한 뒤,
+3. `rebuild_spans()`가 감시자 노드 `head`부터 전 레벨 span을 새로 쓰는
+
+파이프라인으로 재구성되어, 시드에 독립적인 결정론적 동작을 보장한다.
+
+### 2.6 Verification Components in the Repository
+
+`src/Baselines.hpp`에는 정밀 비교를 위한 `SimpleGapBuffer`와 `SimplePieceTable` 구현이 포함되어 있어, 벤치마크 및 디버깅 단계에서 참조 동작을 제공한다. `src/fuzzer.cpp`는 다음과 같은 회귀 도구를 제공한다.
+
+- `simple_sanity_tests`, `split_merge_stress_test`, `random_edit_test`: BiModalText를 `std::string` 참조 모델과 비교하며 삽입·삭제·최적화 연산을 검증한다.
+- `Fuzzer`: 균형 잡힌 삽입/삭제/최적화/읽기 요청을 수천 번 던져, `InvariantChecker`로 `size()`, `iterator`, `to_string()` 일관성을 보장한다.
+
+`src/main.cpp`는 최종 데모로, Insert/Optimize/Re-edit 흐름을 한 번에 보여주며 보고서에 담은 개념적 흐름과 동일하게 동작한다. 루트 디렉터리의 `fuzzer` 실행 파일을 통해 위 회귀 도구를 반복 실행할 수 있다.
 
 ## 3. Related Work and Comparison
 
@@ -67,19 +86,22 @@ Node(int lvl) {
 | **std::vector** | $O(N)$ | Best | Excellent | Low |
 | **std::list** | $O(1)$ | Poor | Poor | High (Pointers) |
 | **Simple Gap Buffer** | $O(N)$ (Move) | Good | Good | Low |
-| **Rope (Tree)** | $O(log N)$ | Fair | Poor (Tree) | High (Nodes) |
-| **Bi-Modal Skip List** | **$O(log N)$** | **Excellent** | **High** | **Medium** |
+| **Piece Table** | $O(1)$ metadata | Fair | Fair | Medium (Lists) |
+| **Rope (Tree)** | $O(\log N)$ | Fair | Poor (Tree) | High (Nodes) |
+| **Bi-Modal Skip List** | **$O(\log N)$** | **Excellent** | **High** | **Medium** |
 
-  * **vs. Simple Gap Buffer:** 단일 Gap Buffer는 커서 이동 시 전체 데이터를 이동해야 하지만, Bi-Modal 구조는 해당 위치의 노드만 수정하므로 랜덤 액세스 편집에 강력하다.
+  * **vs. Simple Gap Buffer:** 단일 Gap Buffer는 커서 이동 시 전체 데이터를 이동해야 하지만, Bi-Modal 구조는 해당 위치의 노드만 수정하므로 랜덤 액세스 편집에 강력하다. `SimpleGapBuffer` baseline으로 구현·검증했다.
+  * **vs. Piece Table:** Piece Table은 메타데이터만 조작해 빠르지만, 외부 버퍼 접근이 잦아 캐시 연속성이 떨어진다. Bi-Modal은 `optimize()` 후 모든 노드가 CompactNode여서 캐시 히트율이 높다.
   * **vs. Rope:** Rope는 이진 트리 구조로 인해 순차 읽기 시 'Pointer Chasing'이 발생하여 느리다. 반면, 제안 구조는 `optimize()` 후 노드 내부가 연속적이므로 읽기 속도가 월등하다.
 
 ## 4. Evaluation and Analysis
 
-### 4.1 Experimental Setup
+### 4.1 Experimental & Verification Setup
 
   * **Environment:** Ubuntu Linux (x86_64), Intel Core Processor
-  * **Compiler:** clang++-21 (C++17 Standard), Optimization flags: `-O3 -march=native`
-  * **Baseline:** `std::vector`, `std::deque`, `std::list`, `SimpleGapBuffer`, `__gnu_cxx::rope`
+  * **Compiler:** clang++-21 for release benchmarks (`-O3 -march=native`), g++-11 for sanitizer/fuzzer runs (`-Og -fsanitize=address,undefined`)
+  * **Benchmark Harness:** `src/benchmark.cpp` compares BiModalText against `std::vector`, `std::deque`, `std::list`, `SimpleGapBuffer`, `SimplePieceTable`, `__gnu_cxx::rope`.
+  * **Verification Harness:** `src/fuzzer.cpp`(및 루트 `fuzzer` 실행 파일)은 단위 회귀와 확률적 퍼징을 한 번에 수행한다.
 
 ### 4.2 Scenario Analysis
 
@@ -107,6 +129,10 @@ Node(int lvl) {
   * `Rope`: 11.41ms (트리 탐색 및 캐시 미스)
   * **BiModal:** **0.31ms**
   * 결과적으로 **Gap Buffer 대비 4.5배, Rope 대비 36배**의 압도적인 성능 향상을 보였다. 이는 지역성(Gap Buffer)과 탐색 효율(Skip List)의 장점을 성공적으로 결합했음을 의미한다.
+
+### 4.3 Robustness Through Regression & Fuzzing
+
+Gemini 초안의 모든 수치는 대규모 퍼징과 함께 보고된다. `run_regression_suite()`는 삽입/삭제/옵티마이즈 승인 시나리오를 결정론적으로 재생한 뒤, 서로 다른 시드(1,2,3)에 대해 2,000회 랜덤 편집을 수행한다. 이어지는 `Fuzzer` 클래스는 100회마다 상태를 검증하고, 실패 시 최근 10개 연산 로그와 Skip List 구조를 덤프해 재현성을 보장한다. 이 과정에서 `rebuild_spans()` 수정을 거친 이후로는 `iterator`, `at()`, `to_string()` 사이의 어긋남이 보고되지 않았다.
 
 ## 5. Limitations and Future Work
 
