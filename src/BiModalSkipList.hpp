@@ -167,6 +167,7 @@ public:
                     head->span[i] = target->content_size(); 
                 }
                 total_size += s.size();
+                rebuild_spans();
                 return; // 여기서 함수 종료!
             } else {
                  throw std::runtime_error("Unexpected null target on non-empty list");
@@ -193,6 +194,7 @@ public:
         }
         
         total_size += s.size(); // *주의: Early return 했으므로 여기 도달하는 건 일반 케이스뿐임
+        rebuild_spans();
     }
 
     char at(size_t pos) const {
@@ -316,27 +318,7 @@ public:
                 curr = next_node;
             }
         }
-        // ✅ NEW: Level-0 spans 강제 동기화 (merge 후 content 변함)
-        Node* pred = head;
-        Node* node = head->next[0];
-        while (node) {
-            pred->span[0] = node->content_size();
-            pred = node;
-            node = node->next[0];
-        }
-        if (pred) pred->span[0] = 0;  // 마지막 노드 span[0]=0
-
-        // ✅ NEW: higher spans 재계산 (O(#nodes * MAX_LEVEL) 빠름)
-
-        for (int lvl = 1; lvl < MAX_LEVEL; ++lvl) {
-            Node* x = head;
-            while (x->next[lvl]) {
-                Node* tgt = x->next[lvl];
-                // span[lvl] = tgt content + tgt의 하위 jump span (subtree sum)
-                x->span[lvl] = tgt->content_size() + tgt->span[lvl];
-                x = tgt;
-            }
-        }
+        rebuild_spans();
     }
     
     size_t size() const { return total_size; }
@@ -398,6 +380,8 @@ public:
                 remove_node(target, update);
             }
         }
+        
+        rebuild_spans();
     }
 
 private:
@@ -408,6 +392,45 @@ private:
     size_t total_size;
     std::mt19937 gen;
     std::uniform_real_distribution<> dist;
+
+    void rebuild_spans() {
+        if (!head) return;
+
+        Node* pred = head;
+        Node* node = head->next[0];
+        while (node) {
+            pred->span[0] = node->content_size();
+            pred = node;
+            node = node->next[0];
+        }
+        if (pred) pred->span[0] = 0;
+
+        Node* base = head;
+        while (base) {
+            for (int lvl = 1; lvl < base->level; ++lvl) {
+                Node* target = base->next[lvl];
+                if (!target) {
+                    base->span[lvl] = 0;
+                    continue;
+                }
+
+                size_t distance = 0;
+                Node* walker = base->next[0];
+                while (walker && walker != target) {
+                    distance += walker->content_size();
+                    walker = walker->next[0];
+                }
+
+                if (!walker) {
+                    base->span[lvl] = 0;
+                } else {
+                    distance += walker->content_size();
+                    base->span[lvl] = distance;
+                }
+            }
+            base = base->next[0];
+        }
+    }
 
     int random_level() {
         int lvl = 1;
