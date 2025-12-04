@@ -49,30 +49,42 @@ public:
         size_t offset;
         
         // --- [캐싱 변수] ---
-        const char* cached_ptr;
-        size_t cached_len;    // [New] 현재 노드의 데이터 크기 캐싱
-        bool is_compact;
+        enum class Mode { None, Compact, Gap };
+        Mode mode;
+        const char* compact_ptr;
+        size_t cached_len;    // 현재 노드의 전체 길이
+        const char* gap_front_ptr;
+        size_t gap_front_len;
+        const char* gap_back_ptr;
+        size_t gap_back_len;
 
         void update_cache() {
             if (!curr_node) {
-                cached_ptr = nullptr;
+                mode = Mode::None;
+                compact_ptr = nullptr;
                 cached_len = 0;
-                is_compact = false;
+                gap_front_ptr = gap_back_ptr = nullptr;
+                gap_front_len = gap_back_len = 0;
                 return;
             }
             
             // 노드 타입에 따라 길이와 포인터를 미리 가져옴 (std::visit 1회 수행)
             if (std::holds_alternative<CompactNode>(curr_node->data)) {
                 const auto& c_node = std::get<CompactNode>(curr_node->data);
-                is_compact = true;
-                cached_ptr = c_node.buf.data();
+                mode = Mode::Compact;
+                compact_ptr = c_node.buf.data();
                 cached_len = c_node.buf.size();
-            } else {
+                gap_front_ptr = gap_back_ptr = nullptr;
+                gap_front_len = gap_back_len = 0;
+            } else { // GapNode fast path
                 const auto& g_node = std::get<GapNode>(curr_node->data);
-                is_compact = false;
+                mode = Mode::Gap;
                 cached_len = g_node.size();
-                // GapNode는 포인터 하나로 표현 불가능하므로 cached_ptr은 사용 안 함(혹은 부분 사용)
-                cached_ptr = nullptr; 
+                gap_front_ptr = g_node.buf.data();
+                gap_front_len = g_node.gap_start;
+                gap_back_ptr = g_node.buf.data() + g_node.gap_end;
+                gap_back_len = g_node.buf.size() - g_node.gap_end;
+                compact_ptr = nullptr;
             }
         }
 
@@ -83,11 +95,16 @@ public:
 
         char operator*() const {
             if (!curr_node) return '\0';
-            // Compact 모드면 포인터 직접 접근 (Fast Path)
-            if (is_compact) return cached_ptr[offset];
-            
-            // Gap 모드면 기존 방식 (Slow Path) - 어쩔 수 없음
-            return std::visit([this](auto const& n) { return n.at(offset); }, curr_node->data);
+            if (mode == Mode::Compact) {
+                return compact_ptr[offset];
+            } else if (mode == Mode::Gap) {
+                if (offset < gap_front_len) {
+                    return gap_front_ptr[offset];
+                }
+                size_t back_offset = offset - gap_front_len;
+                return gap_back_ptr[back_offset];
+            }
+            return '\0';
         }
 
         Iterator& operator++() {

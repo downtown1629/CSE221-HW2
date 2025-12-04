@@ -206,7 +206,6 @@ TypingStats bench_rope_once() {
 TypingStats bench_bimodal_once() {
     BiModalText bmt;
     for(int i=0; i<INITIAL_SIZE/1000; ++i) bmt.insert(bmt.size(), string(1000, 'x'));
-    bmt.optimize(); 
 
     Timer t;
     size_t mid = bmt.size() / 2;
@@ -216,6 +215,9 @@ TypingStats bench_bimodal_once() {
         bmt.insert(mid + i, "A"); 
     }
     double time_insert = t.elapsed_ms();
+
+    // 사용자가 명시적으로 optimize()를 요청하는 시점을 분리한다.
+    bmt.optimize();
 
     t.reset();
     long long sum = 0;
@@ -535,23 +537,62 @@ void bench_random_access() {
 #endif
 
     {
-        auto best = run_best_of([&]() {
-            mt19937 local_gen = gen;
-            auto local_dist = dist;
-            BiModalText bmt;
-            for(int i=0; i<TEST_SIZE/1000; ++i) bmt.insert(0, string(1000, 'x'));
-            bmt.optimize(); 
+        struct BiModalRandomStats {
+            double edit_ms;
+            double optimize_ms;
+            double scan_ms;
+        };
 
-            Timer t;
-            for (int i = 0; i < RAND_INSERTS; ++i) {
-                size_t pos = local_dist(local_gen) % bmt.size();
-                bmt.insert(pos, "A"); 
+        auto best = [&]() {
+            BiModalRandomStats best_stats{
+                std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::infinity()
+            };
+
+            for (int attempt = 0; attempt < SCENARIO_REPEATS; ++attempt) {
+                mt19937 local_gen = gen;
+                auto local_dist = dist;
+                BiModalText bmt;
+                for(int i=0; i<TEST_SIZE/1000; ++i) bmt.insert(0, string(1000, 'x'));
+
+                Timer edit_timer;
+                edit_timer.reset();
+                for (int i = 0; i < RAND_INSERTS; ++i) {
+                    size_t pos = local_dist(local_gen) % bmt.size();
+                    bmt.insert(pos, "A");
+                }
+                double edit_ms = edit_timer.elapsed_ms();
+
+                Timer opt_timer;
+                opt_timer.reset();
+                bmt.optimize();
+                double optimize_ms = opt_timer.elapsed_ms();
+
+                long long sum = 0;
+                Timer scan_timer;
+                scan_timer.reset();
+                bmt.scan([&](char c) { sum += c; });
+                double scan_ms = scan_timer.elapsed_ms();
+                dummy_checksum += sum;
+
+                best_stats.edit_ms = std::min(best_stats.edit_ms, edit_ms);
+                best_stats.optimize_ms = std::min(best_stats.optimize_ms, optimize_ms);
+                best_stats.scan_ms = std::min(best_stats.scan_ms, scan_ms);
             }
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "BiModalText" 
-             << setw(15) << best 
+
+            return best_stats;
+        }();
+
+        cout << left << setw(18) << "BiModalText (Insert)" 
+             << setw(15) << best.edit_ms 
              << "(Log Search)" << endl;
+        cout << left << setw(18) << "BiModalText optimize()" 
+             << setw(15) << best.optimize_ms 
+             << "(Post-edit)" << endl;
+        cout << left << setw(18) << "BiModalText scan()" 
+             << setw(15) << best.scan_ms 
+             << "(Read throughput)" << endl;
     }
 }
 
