@@ -11,7 +11,7 @@
 using namespace std;
 
 // -----------------------------------------------------------------------------
-// Gemini regression helpers
+// Tester regression helpers
 // -----------------------------------------------------------------------------
 
 void check_equal(const string& ref, const BiModalText& txt,
@@ -236,13 +236,13 @@ void random_edit_test(int seed, int ops) {
 }
 
 void run_regression_suite() {
-    cout << "\n[REGRESSION] Running deterministic Gemini tests...\n";
+    cout << "\n[REGRESSION] Running deterministic tests...\n";
     simple_sanity_tests();
     split_merge_stress_test();
     random_edit_test(1, 2000);
     random_edit_test(2, 2000);
     random_edit_test(3, 2000);
-    cout << "\u2713 Gemini regression suite passed\n";
+    cout << "\u2713 Testing regression suite passed\n";
 }
 
 // -----------------------------------------------------------------------------
@@ -589,9 +589,9 @@ void run_boundary_tests() {
 
 int main(int argc, char* argv[]) {
     cout << "\n";
-    cout << "╔═══════════════════════════════════════════════════╗\n";
-    cout << "║   BiModalText Advanced Fuzzing & Verification   ║\n";
-    cout << "╚═══════════════════════════════════════════════════╝\n";
+    cout << "╔══════════════════════════════════════════════════╗\n";
+    cout << "║   BiModalText Advanced Fuzzing & Verification    ║\n";
+    cout << "╚══════════════════════════════════════════════════╝\n";
 
     try {
         run_regression_suite();
