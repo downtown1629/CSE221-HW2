@@ -35,6 +35,14 @@ public:
     BiModalText(BiModalText&&) noexcept = delete;
     BiModalText& operator=(BiModalText&&) noexcept = delete;
 
+    #ifdef BIMODAL_DEBUG
+    // span, total_size, at()/to_string() 일관성 검사
+    void debug_verify_spans(std::ostream& os = std::cerr) const;
+
+    // 레벨 0 기준 노드 구조 덤프
+    void debug_dump_structure(std::ostream& os = std::cerr) const;
+    #endif
+
     // --- [Move Up] Iterator Definition & Smart Caching ---
     class Iterator {
         const Node* curr_node;
@@ -562,4 +570,79 @@ private:
         delete target;
     }
 
+
 };
+
+#ifdef BIMODAL_DEBUG
+void BiModalText::debug_verify_spans(std::ostream& os) const {
+    // 1) level 0에서 content_size 합 == total_size?
+    size_t sum0 = 0;
+    const Node* curr = head->next[0];
+    while (curr) {
+        sum0 += curr->content_size();
+        curr = curr->next[0];
+    }
+    if (sum0 != total_size) {
+        os << "[DEBUG FAIL] L0 sum0=" << sum0 << " != total=" << total_size << "\n";
+    }
+
+    // 2) 각 레벨 span 합 == total_size?
+    for (int lvl = 0; lvl < MAX_LEVEL; ++lvl) {
+        size_t acc = 0;
+        const Node* x = head;
+        while (x->next[lvl]) {
+            acc += x->span[lvl];
+            x = x->next[lvl];
+        }
+        if (acc != total_size) {
+            os << "[DEBUG FAIL] L" << lvl << " span_sum=" << acc << " != total=" << total_size << "\n";
+        }
+    }
+
+    // 3) to_string() size 체크 + at() vs to_string() 샘플링
+    std::string full_str = to_string();
+    if (full_str.size() != total_size) {
+        os << "[DEBUG FAIL] to_string.size()=" << full_str.size() << " != total=" << total_size << "\n";
+    }
+    const size_t N_CHECK = std::min<size_t>(total_size, 5000);
+    for (size_t p = 0; p < N_CHECK; ++p) {
+        if (at(p) != full_str[p]) {
+            os << "[DEBUG FAIL] at(" << p << ")='" << at(p) << "' != to_str='" << full_str[p] << "'\n";
+            break;
+        }
+    }
+    os << "[DEBUG OK] spans verified\n";
+}
+
+void BiModalText::debug_dump_structure(std::ostream& os) const {
+    os << "=== BiModalText DUMP (total_size=" << total_size << ") ===\n";
+    const Node* curr = head->next[0];
+    size_t off = 0;
+    int idx = 0;
+    while (curr) {
+        os << "N" << idx << "(off=" << off << ", sz=" << curr->content_size()
+           << ", lvl=" << curr->level << ") ";
+
+        if (std::holds_alternative<CompactNode>(curr->data)) {
+            const CompactNode& cn = std::get<CompactNode>(curr->data);
+            os << "[COMPACT buf=" << cn.buf.size() << "]";
+        } else {
+            const GapNode& gn = std::get<GapNode>(curr->data);
+            os << "[GAP buf=" << gn.buf.size()
+               << " gap=[" << gn.gap_start << "," << gn.gap_end << ")"
+               << " logical=" << gn.size() << "]";
+        }
+
+        // span 샘플 (상위 3레벨만)
+        for (int l = 0; l < std::min(3, curr->level); ++l) {
+            os << " L" << l << ":" << curr->span[l];
+        }
+        os << "\n";
+
+        off += curr->content_size();
+        curr = curr->next[0];
+        ++idx;
+    }
+    os << "=== END DUMP ===\n";
+}
+#endif  // BIMODAL_DEBUG

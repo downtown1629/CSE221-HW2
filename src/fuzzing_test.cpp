@@ -97,54 +97,54 @@ public:
     Fuzzer(unsigned seed) : gen(seed) {}
 
     void run(int iterations, bool verbose = false) {
-        cout << "Running fuzzer with " << iterations << " iterations (seed=" << gen() << ")...\n";
+    cout << "Running fuzzer with " << iterations
+         << " iterations (seed=" << gen() << ")...\n";
 
-        for (int i = 0; i < iterations; ++i) {
-            OpType op = static_cast<OpType>(op_dist(gen));
-
-            try {
-                switch (op) {
-                    case OP_INSERT:
-                        do_insert();
-                        break;
-                    case OP_ERASE:
-                        do_erase();
-                        break;
-                    case OP_OPTIMIZE:
-                        do_optimize();
-                        break;
-                    case OP_READ:
-                        do_read();
-                        break;
-                }
-
-                // 주기적으로 불변식 검증
-                if (i % 100 == 99) {
-                    verify_state();
-                    if (verbose && i % 500 == 499) {
-                        cout << "  [" << i+1 << "/" << iterations << "] "
-                             << "Size: " << bmt.size() 
-                             << ", Ops: I=" << count_ops(OP_INSERT)
-                             << " E=" << count_ops(OP_ERASE)
-                             << " O=" << count_ops(OP_OPTIMIZE) << "\n";
-                    }
-                }
-
-            } catch (const exception& e) {
-                cerr << "\n=== FUZZER CAUGHT BUG at iteration " << i << " ===\n";
-                cerr << "Error: " << e.what() << "\n";
-                print_recent_history(10);
-                throw;
+    for (int i = 0; i < iterations; ++i) {
+        OpType op = static_cast<OpType>(op_dist(gen));
+        try {
+            switch (op) {
+                case OP_INSERT:   do_insert();   break;
+                case OP_ERASE:    do_erase();    break;
+                case OP_OPTIMIZE: do_optimize(); break;
+                case OP_READ:     do_read();     break;
             }
+
+            if (i % 100 == 99) {
+                verify_state();
+                if (verbose && i % 500 == 499) {
+                    cout << "  [" << i+1 << "/" << iterations << "] "
+                         << "Size: " << bmt.size()
+                         << ", Ops: I=" << count_ops(OP_INSERT)
+                         << " E=" << count_ops(OP_ERASE)
+                         << " O=" << count_ops(OP_OPTIMIZE) << "\n";
+                }
+            }
+        } catch (const exception& e) {
+            cerr << "\n=== FUZZER CAUGHT BUG at iteration " << i << " ===\n";
+            cerr << "Error: " << e.what() << "\n";
+            print_recent_history(10);
+
+#ifdef BIMODAL_DEBUG
+            try {
+                cerr << "\n[DEBUG] Verifying spans & dumping structure...\n";
+                bmt.debug_verify_spans(cerr);
+                bmt.debug_dump_structure(cerr);
+            } catch (...) {
+                cerr << "[DEBUG] Exception during debug verification\n";
+            }
+#endif
+            throw;
         }
-
-        // 최종 검증
-        verify_state();
-        InvariantChecker(bmt).check_all();
-
-        cout << "✓ Fuzzer completed successfully\n";
-        print_stats();
     }
+
+    // 최종 검증
+    verify_state();
+    InvariantChecker(bmt).check_all();
+    cout << "✓ Fuzzer completed successfully\n";
+    print_stats();
+}
+
 
 private:
     void do_insert() {
@@ -189,50 +189,78 @@ private:
     }
 
     void do_read() {
-        if (reference.empty()) return;
+    if (reference.empty()) return;
 
-        // 여러 위치에서 랜덤 읽기
-        for (int i = 0; i < 5 && !reference.empty(); ++i) {
-            size_t pos = gen() % reference.size();
-            char expected = reference[pos];
-            char actual = bmt.at(pos);
-
-            if (expected != actual) {
-                throw runtime_error(
-                    "Read mismatch at pos " + to_string(pos) +
-                    ": expected '" + expected + "', got '" + actual + "'"
-                );
+    for (int i = 0; i < 5 && !reference.empty(); ++i) {
+        size_t pos = gen() % reference.size();
+        char expected = reference[pos];
+        char actual = bmt.at(pos);
+        if (expected != actual) {
+#ifdef BIMODAL_DEBUG
+            cerr << "[DEBUG] Read mismatch detected in do_read()\n";
+            cerr << "  pos=" << pos
+                 << " expected='" << expected
+                 << "' got='" << actual << "'\n";
+            try {
+                InvariantChecker(bmt).check_all();
+            } catch (const exception& e) {
+                cerr << "[DEBUG] InvariantChecker failed: " << e.what() << "\n";
             }
-        }
-
-        history.push_back({OP_READ, 0, "", 0});
-    }
-
-    void verify_state() {
-        string actual = bmt.to_string();
-        if (actual != reference) {
-            cerr << "STATE DIVERGENCE DETECTED\n"
-                 << "  Reference size: " << reference.size() << "\n"
-                 << "  Actual size:    " << bmt.size() << "\n";
-
-            // 차이나는 첫 위치 찾기
-            size_t diff_pos = 0;
-            size_t min_len = min(reference.size(), actual.size());
-            while (diff_pos < min_len && reference[diff_pos] == actual[diff_pos]) {
-                diff_pos++;
+            try {
+                bmt.debug_verify_spans(cerr);
+                bmt.debug_dump_structure(cerr);
+            } catch (...) {
+                cerr << "[DEBUG] Exception during debug verification\n";
             }
-
-            cerr << "  First diff at:  " << diff_pos << "\n";
-            throw runtime_error("State verification failed");
-        }
-
-        if (bmt.size() != reference.size()) {
+#endif
             throw runtime_error(
-                "Size mismatch: bmt.size()=" + to_string(bmt.size()) +
-                " reference.size()=" + to_string(reference.size())
+                "Read mismatch at pos " + to_string(pos) +
+                ": expected '" + expected + "', got '" + actual + "'"
             );
         }
     }
+    history.push_back({OP_READ, 0, "", 0});
+}
+
+
+    void verify_state() {
+    string actual = bmt.to_string();
+    if (actual != reference) {
+        cerr << "STATE DIVERGENCE DETECTED\n"
+             << " Reference size: " << reference.size() << "\n"
+             << " Actual size: " << actual.size() << "\n";
+
+        size_t diff_pos = 0;
+        size_t min_len = min(reference.size(), actual.size());
+        while (diff_pos < min_len && reference[diff_pos] == actual[diff_pos]) {
+            diff_pos++;
+        }
+        cerr << " First diff at: " << diff_pos << "\n";
+        if (diff_pos < min_len) {
+            cerr << "  ref[" << diff_pos << "]='" << reference[diff_pos] << "'\n";
+            cerr << "  act[" << diff_pos << "]='" << actual[diff_pos] << "'\n";
+        }
+
+        auto slice = [](const string& s, size_t pos, size_t radius) {
+            if (s.empty()) return string{};
+            size_t start = (pos > radius) ? pos - radius : 0;
+            size_t end   = min(s.size(), pos + radius + 1);
+            return s.substr(start, end - start);
+        };
+        cerr << "  ref context : \"" << slice(reference, diff_pos, 20) << "\"\n";
+        cerr << "  act context : \"" << slice(actual, diff_pos, 20) << "\"\n";
+
+        throw runtime_error("State verification failed");
+    }
+
+    if (bmt.size() != reference.size()) {
+        throw runtime_error(
+            "Size mismatch: bmt.size()=" + to_string(bmt.size()) +
+            " reference.size()=" + to_string(reference.size())
+        );
+    }
+}
+
 
     int count_ops(OpType type) const {
         return count_if(history.begin(), history.end(),

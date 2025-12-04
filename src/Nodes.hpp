@@ -134,7 +134,11 @@ struct GapNode {
         size_t new_cap = std::max(old_cap * 2, old_cap + needed + DEFAULT_GAP_SIZE);
         size_t back_part_size = old_cap - gap_end;
         
-        std::vector<char> new_buf(new_cap);
+        std::vector<char> new_buf(new_cap); // 0으로 초기화됨 (낭비)
+
+        // [After] 초기화 없이 메모리만 확보
+        //std::vector<char> new_buf;
+        //new_buf.reserve(new_cap); 
         
         // Gap 앞부분 복사
         std::copy(buf.begin(), buf.begin() + gap_start, new_buf.begin());

@@ -10,6 +10,7 @@ using std::cout;
 using std::endl;
 
 // 공통 검증 함수: std::string(ref) vs BiModalText(txt)
+
 void check_equal(const std::string& ref, const BiModalText& txt,
                  const char* where, int step, int seed) {
     if (ref.size() != txt.size()) {
@@ -17,54 +18,108 @@ void check_equal(const std::string& ref, const BiModalText& txt,
                   << " step=" << step << " seed=" << seed
                   << " ref=" << ref.size()
                   << " txt=" << txt.size() << std::endl;
+
+#ifdef BIMODAL_DEBUG
+        txt.debug_verify_spans(std::cerr);
+        txt.debug_dump_structure(std::cerr);
+#endif
         std::exit(1);
     }
 
-    // to_string() 비교
     std::string txt_str = txt.to_string();
     if (txt_str != ref) {
         std::cerr << "[FAIL] content mismatch at " << where
                   << " step=" << step << " seed=" << seed << std::endl;
-        std::cerr << "ref : \"" << ref << "\"" << std::endl;
-        std::cerr << "txt : \"" << txt_str << "\"" << std::endl;
+
+        // 첫 diff 위치 탐색
+        size_t min_len = std::min(ref.size(), txt_str.size());
+        size_t diff_pos = 0;
+        while (diff_pos < min_len && ref[diff_pos] == txt_str[diff_pos])
+            ++diff_pos;
+
+        std::cerr << "First diff at index " << diff_pos << std::endl;
+
+        auto slice = [](const std::string& s, size_t pos, size_t radius) {
+            if (s.empty()) return std::string{};
+            size_t start = (pos > radius) ? pos - radius : 0;
+            size_t end   = std::min(s.size(), pos + radius + 1);
+            return s.substr(start, end - start);
+        };
+
+        std::cerr << "ref context : \"" << slice(ref, diff_pos, 20) << "\"\n";
+        std::cerr << "txt context : \"" << slice(txt_str, diff_pos, 20) << "\"\n";
+
+#ifdef BIMODAL_DEBUG
+        txt.debug_verify_spans(std::cerr);
+        txt.debug_dump_structure(std::cerr);
+#endif
         std::exit(1);
     }
 
-    // iterator(begin/end)로 한 번 더 확인
+    // iterator 확인은 그대로 두되, 실패 시 위치/문자 출력
     std::string via_iter;
     via_iter.reserve(ref.size());
-    for (char c : txt) {
-        via_iter.push_back(c);
-    }
+    for (char c : txt) via_iter.push_back(c);
+
     if (via_iter != ref) {
         std::cerr << "[FAIL] iterator mismatch at " << where
                   << " step=" << step << " seed=" << seed << std::endl;
+
+        size_t min_len = std::min(ref.size(), via_iter.size());
+        size_t diff_pos = 0;
+        while (diff_pos < min_len && ref[diff_pos] == via_iter[diff_pos])
+            ++diff_pos;
+
+        std::cerr << "First diff at index " << diff_pos << std::endl;
+
+#ifdef BIMODAL_DEBUG
+        txt.debug_verify_spans(std::cerr);
+        txt.debug_dump_structure(std::cerr);
+#endif
         std::exit(1);
     }
 
-    // spot-check at() 몇 개
     if (!ref.empty()) {
-        // first / last
         if (txt.at(0) != ref[0]) {
-            std::cerr << "[FAIL] at(0) mismatch at " << where << std::endl;
+            std::cerr << "[FAIL] at(0) mismatch at " << where
+                      << " step=" << step << " seed=" << seed
+                      << " txt=" << txt.at(0)
+                      << " ref=" << ref[0] << std::endl;
+#ifdef BIMODAL_DEBUG
+            txt.debug_verify_spans(std::cerr);
+            txt.debug_dump_structure(std::cerr);
+#endif
             std::exit(1);
         }
         if (txt.at(ref.size() - 1) != ref.back()) {
-            std::cerr << "[FAIL] at(last) mismatch at " << where << std::endl;
+            std::cerr << "[FAIL] at(last) mismatch at " << where
+                      << " step=" << step << " seed=" << seed << std::endl;
+#ifdef BIMODAL_DEBUG
+            txt.debug_verify_spans(std::cerr);
+            txt.debug_dump_structure(std::cerr);
+#endif
             std::exit(1);
         }
-        // 랜덤 인덱스 몇 개
-        std::mt19937 rng(123456); // deterministic
+
+        std::mt19937 rng(123456);
         for (int k = 0; k < 10 && ref.size() > 1; ++k) {
             size_t pos = rng() % ref.size();
-            if (txt.at(pos) != ref[pos]) {
-                std::cerr << "[FAIL] at(" << pos << ") mismatch at " << where
-                          << " step=" << step << " seed=" << seed << std::endl;
+            char a = txt.at(pos);
+            char b = ref[pos];
+            if (a != b) {
+                std::cerr << "[FAIL] at(" << pos << ") mismatch at "
+                          << where << " step=" << step << " seed=" << seed
+                          << " txt=" << a << " ref=" << b << std::endl;
+#ifdef BIMODAL_DEBUG
+                txt.debug_verify_spans(std::cerr);
+                txt.debug_dump_structure(std::cerr);
+#endif
                 std::exit(1);
             }
         }
     }
 }
+
 
 // 1) 기본적인 동작 확인용
 void simple_sanity_tests() {
