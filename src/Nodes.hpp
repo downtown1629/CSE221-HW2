@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <algorithm>
 #include <cstring>
+#include <span>
 
 constexpr size_t DEFAULT_GAP_SIZE = 128;   // 필요시 값 조정 (기존 값 사용)
 constexpr size_t NODE_MAX_SIZE = 4096;  // 노드 최대 크기
@@ -28,6 +29,8 @@ struct CompactNode {
 
     size_t size() const { return buf.size(); }
     char at(size_t i) const { return buf[i]; }
+
+    std::span<const char> data_span() const { return std::span<const char>(buf.data(), buf.size()); }
     
     std::string to_string() const {
         return std::string(buf.begin(), buf.end());
@@ -69,6 +72,14 @@ struct GapNode {
     // 문자 접근
     char at(size_t i) const {
         return buf[physical_index(i)];
+    }
+
+    std::span<const char> front_span() const {
+        return std::span<const char>(buf.data(), gap_start);
+    }
+
+    std::span<const char> back_span() const {
+        return std::span<const char>(buf.data() + gap_end, buf.size() - gap_end);
     }
 
     // Gap 이동 (커서 이동)

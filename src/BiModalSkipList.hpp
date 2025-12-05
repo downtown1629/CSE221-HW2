@@ -144,19 +144,13 @@ public:
                 
                 if constexpr (std::is_same_v<T, CompactNode>) {
                     // [Fast Path] 연속된 메모리 -> 컴파일러가 SIMD 최적화하기 딱 좋음
-                    const char* data = n.buf.data();
-                    size_t sz = n.buf.size();
-                    for (size_t i = 0; i < sz; ++i) {
-                        func(data[i]);
+                    for (char c : n.data_span()) {
+                        func(c);
                     }
                 } else {
-                    // GapNode: 두 덩어리로 나눠서 처리
-                    const char* data = n.buf.data();
-                    // Part 1: Gap 앞
-                    for (size_t i = 0; i < n.gap_start; ++i) func(data[i]);
-                    // Part 2: Gap 뒤
-                    size_t sz = n.buf.size();
-                    for (size_t i = n.gap_end; i < sz; ++i) func(data[i]);
+                    // GapNode: 두 덩어리로 나눠서 처리 (span 뷰 활용)
+                    for (char c : n.front_span()) func(c);
+                    for (char c : n.back_span()) func(c);
                 }
             }, curr->data);
             
