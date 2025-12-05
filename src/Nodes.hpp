@@ -30,7 +30,7 @@ struct CompactNode {
     size_t size() const { return buf.size(); }
     char at(size_t i) const { return buf[i]; }
 
-    std::span<const char> data_span() const { return std::span<const char>(buf.data(), buf.size()); }
+    inline std::span<const char> data_span() const { return std::span<const char>(buf.data(), buf.size()); }
     
     std::string to_string() const {
         return std::string(buf.begin(), buf.end());
@@ -74,11 +74,11 @@ struct GapNode {
         return buf[physical_index(i)];
     }
 
-    std::span<const char> front_span() const {
+    inline std::span<const char> front_span() const {
         return std::span<const char>(buf.data(), gap_start);
     }
 
-    std::span<const char> back_span() const {
+    inline std::span<const char> back_span() const {
         return std::span<const char>(buf.data() + gap_end, buf.size() - gap_end);
     }
 

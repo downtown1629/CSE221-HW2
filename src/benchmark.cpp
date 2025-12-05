@@ -92,7 +92,7 @@ TypingStats run_best_typing(Func&& func) {
 // =========================================================
 //  Test Parameters
 // =========================================================
-const int INITIAL_SIZE = 5 * 1024 * 1024; // 5MB
+const int INITIAL_SIZE = 10 * 1024 * 1024; // 10MB
 const int INSERT_COUNT = 1000;
 long long dummy_checksum = 0;
 
@@ -235,7 +235,7 @@ TypingStats bench_bimodal_once() {
 
 
 void bench_deletion() {
-    const int INITIAL_N = 5 * 1024 * 1024;
+    const int INITIAL_N = 10 * 1024 * 1024;
     const int DELETE_OPS = 10000; 
 
     cout << "\n[Scenario D: The Backspacer (Backspace " << DELETE_OPS
@@ -311,7 +311,7 @@ void bench_deletion() {
 }
 
 void bench_mixed_workload() {
-    const int N = 5 * 1024 * 1024;
+    const int N = 10 * 1024 * 1024;
     const int ITERATIONS = 1000; 
 
     cout << "\n[Scenario E: The Refactorer (" << (N / 1024 / 1024)
@@ -496,7 +496,7 @@ void bench_typing_read(const vector<TypingRow>& rows) {
 }
 
 void bench_random_access() {
-    const int TEST_SIZE = 5 * 1024 * 1024; 
+    const int TEST_SIZE = 10 * 1024 * 1024; 
     const int RAND_INSERTS = 5000; 
     
     cout << "\n[Scenario F: Random Cursor Movement & Insertion (best of "
