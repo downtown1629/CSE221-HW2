@@ -62,8 +62,20 @@ struct TypingRow {
     bool measure_insert;
     bool measure_read;
     TypingStats stats;
-    string note;
+    string insert_note;
+    string read_note;
 };
+
+// Chunked prefill helper to unify setup across data structures.
+template <typename AppendFn>
+inline void prefill_chunks(std::size_t total_bytes, std::size_t chunk_size, AppendFn&& append) {
+    std::size_t filled = 0;
+    while (filled < total_bytes) {
+        std::size_t len = std::min(chunk_size, total_bytes - filled);
+        append(len);
+        filled += len;
+    }
+}
 
 template <typename Func>
 TypingStats run_best_typing(Func&& func) {
@@ -156,11 +168,16 @@ TypingStats bench_piece_table_once() {
     NaivePieceTable pt;
     pt.insert(0, string(INITIAL_SIZE, 'x'));
 
-    const double time_insert = 0.0; // Skip expensive O(N) insert benchmarking
+    Timer t;
+    size_t mid = pt.size() / 2;
+    t.reset();
+    for (int i = 0; i < INSERT_COUNT; ++i) {
+        pt.insert(mid + i, "A");
+    }
+    double time_insert = t.elapsed_ms();
 
     // Reading (Scan) - 이제 실제로 측정합니다.
     long long sum = 0;
-    Timer t;
     t.reset();
     pt.scan([&](char c) { sum += c; }); // scan 메서드 사용
     double time_read = t.elapsed_ms();
@@ -308,9 +325,11 @@ void bench_mixed_workload() {
         auto best = run_best_of([&]() {
             string s(N, 'x');
             long long sum = 0;
+            mt19937 rng(12345);
             Timer t;
             for(int i=0; i<ITERATIONS; ++i) {
-                size_t pos = (i * 1234) % s.size(); 
+                std::uniform_int_distribution<size_t> dist(0, s.size() - 1);
+                size_t pos = dist(rng);
                 sum += s[pos];
                 s.insert(pos, "A"); 
             }
@@ -325,9 +344,11 @@ void bench_mixed_workload() {
             SimpleGapBuffer gb(N + ITERATIONS);
             gb.insert(0, string(N, 'x'));
             long long sum = 0;
+            mt19937 rng(12345);
             Timer t;
             for(int i=0; i<ITERATIONS; ++i) {
-                size_t pos = (i * 1234) % gb.size();
+                std::uniform_int_distribution<size_t> dist(0, gb.size() - 1);
+                size_t pos = dist(rng);
                 sum += gb.at(pos); 
                 gb.insert(pos, 'A');
             }
@@ -342,9 +363,11 @@ void bench_mixed_workload() {
             NaivePieceTable pt;
             pt.insert(0, string(N, 'x'));
             long long sum = 0;
+            mt19937 rng(12345);
             Timer t;
             for(int i=0; i<ITERATIONS; ++i) {
-                size_t pos = (i * 1234) % pt.size();
+                std::uniform_int_distribution<size_t> dist(0, pt.size() - 1);
+                size_t pos = dist(rng);
                 sum += pt.at(pos); // O(N) Scan for each read
                 pt.insert(pos, "A"); // O(N) Scan for each insert
             }
@@ -359,9 +382,11 @@ void bench_mixed_workload() {
         auto best = run_best_of([&]() {
             crope r(N, 'x');
             long long sum = 0;
+            mt19937 rng(12345);
             Timer t;
             for(int i=0; i<ITERATIONS; ++i) {
-                size_t pos = (i * 1234) % r.size();
+                std::uniform_int_distribution<size_t> dist(0, r.size() - 1);
+                size_t pos = dist(rng);
                 sum += r[pos]; 
                 r.insert(pos, "A"); 
             }
@@ -380,9 +405,11 @@ void bench_mixed_workload() {
             bmt.optimize();
 
             long long sum = 0;
+            mt19937 rng(12345);
             Timer t;
             for(int i=0; i<ITERATIONS; ++i) {
-                size_t pos = (i * 1234) % bmt.size();
+                std::uniform_int_distribution<size_t> dist(0, bmt.size() - 1);
+                size_t pos = dist(rng);
                 sum += bmt.at(pos); 
                 bmt.insert(pos, "A");
             }
@@ -395,21 +422,34 @@ void bench_mixed_workload() {
 
 vector<TypingRow> compute_typing_rows() {
     vector<TypingRow> rows;
-    rows.push_back({"std::vector", true, true, run_best_typing(bench_vector_once), "(O(N) shift per insert)"});
-    rows.push_back({"std::string", true, true, run_best_typing(bench_string_once), "(Baseline, contiguous)"});
-    rows.push_back({"SimpleGapBuffer", true, true, run_best_typing(bench_simple_gap_once), "(Gap move, occasional expand)"});
-    rows.push_back({"NaivePieceTable", false, true, run_best_typing(bench_piece_table_once), "(Read only; search O(N))"});
+    rows.push_back({"std::vector", true, true, run_best_typing(bench_vector_once),
+                    "(Contiguous array, O(N) shift on insert)",
+                    "(Contiguous array, sequential scan)"}); 
+    rows.push_back({"std::string", true, true, run_best_typing(bench_string_once),
+                    "(Baseline contiguous)",
+                    "(Baseline contiguous, sequential scan)"});
+    rows.push_back({"SimpleGapBuffer", true, true, run_best_typing(bench_simple_gap_once),
+                    "(Gap buffer insert around gap)",
+                    "(Gap buffer, two-span scan)"});
+    rows.push_back({"NaivePieceTable", true, true, run_best_typing(bench_piece_table_once),
+                    "(Piece table, O(N) search/split)",
+                    "(Piece table, linked scan)"});
 #if ROPE_AVAILABLE
-    rows.push_back({"SGI Rope", true, true, run_best_typing(bench_rope_once), "(Tree concat/rebal O(log N))"});
+    rows.push_back({"SGI Rope", true, true, run_best_typing(bench_rope_once),
+                    "(Tree concat/rebal O(log N))",
+                    "(Tree traversal, sequential scan)"});
 #else
-    rows.push_back({"SGI Rope", false, false, TypingStats{0, 0}, "(No rope)"});
+    rows.push_back({"SGI Rope", false, false, TypingStats{0, 0},
+                    "(No rope)", "(No rope)"});
 #endif
-    rows.push_back({"BiModalText", true, true, run_best_typing(bench_bimodal_once), "(Skiplist + gap split/merge)"});
+    rows.push_back({"BiModalText", true, true, run_best_typing(bench_bimodal_once),
+                    "(Skiplist + gap split/merge)",
+                    "(Skiplist nodes, span scan)"});
     return rows;
 }
 
 void bench_typing_insert(const vector<TypingRow>& rows) {
-    cout << "\n[Scenario: Typing Mode - Insert (best of " << SCENARIO_REPEATS << ")]" << endl;
+    cout << "\n[Scenario A: Typing Mode - Insert (best of " << SCENARIO_REPEATS << ")]" << endl;
     cout << "  - N=" << (INITIAL_SIZE / 1024 / 1024) << "MB, Inserts=" << INSERT_COUNT << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure"
@@ -425,7 +465,7 @@ void bench_typing_insert(const vector<TypingRow>& rows) {
         } else {
             cout << setw(15) << "N/A";
         }
-        cout << row.note << endl;
+        cout << row.insert_note << endl;
     }
     cout.unsetf(ios::floatfield);
     cout << setprecision(6);
@@ -433,7 +473,7 @@ void bench_typing_insert(const vector<TypingRow>& rows) {
 
 void bench_typing_read(const vector<TypingRow>& rows) {
     const int READ_SIZE = 100 * 1024 * 1024; // 100MB for read-only scan
-    cout << "\n[Scenario: Typing Mode - Read (best of " << SCENARIO_REPEATS << ")]" << endl;
+    cout << "\n[Scenario B: Sequential Read (best of " << SCENARIO_REPEATS << ")]" << endl;
     cout << "  - N=" << (READ_SIZE / 1024 / 1024) << "MB" << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure"
@@ -449,7 +489,7 @@ void bench_typing_read(const vector<TypingRow>& rows) {
         } else {
             cout << setw(15) << "N/A";
         }
-        cout << row.note << endl;
+        cout << row.read_note << endl;
     }
     cout.unsetf(ios::floatfield);
     cout << setprecision(6);
@@ -459,7 +499,7 @@ void bench_random_access() {
     const int TEST_SIZE = 5 * 1024 * 1024; 
     const int RAND_INSERTS = 5000; 
     
-    cout << "\n[Scenario: Random Cursor Movement & Insertion (best of "
+    cout << "\n[Scenario F: Random Cursor Movement & Insertion (best of "
          << SCENARIO_REPEATS << ")]" << endl;
     cout << "  - N=" << (TEST_SIZE / 1024 / 1024) << "MB, Inserts=" << RAND_INSERTS << endl;
     cout << "--------------------------------------------------------------" << endl;
@@ -564,10 +604,10 @@ void bench_random_access() {
 }
 
 void bench_heavy_typer() {
-    const int LARGE_SIZE = 100 * 1024 * 1024;
+    const size_t LARGE_SIZE = 100ull * 1024 * 1024; // 100MB
     const int HEAVY_INSERTS = 5000;
     
-    cout << "\n[Scenario: The Heavy Typer (best of "
+    cout << "\n[Scenario C: The Heavy Typer (best of "
          << SCENARIO_REPEATS << ")]" << endl;
     cout << "  - N=" << (LARGE_SIZE / 1024 / 1024) << "MB, Inserts=" << HEAVY_INSERTS << endl;
     cout << "--------------------------------------------------------------" << endl;
@@ -577,8 +617,8 @@ void bench_heavy_typer() {
     {
         auto best = run_best_of([&]() {
             SimpleGapBuffer gb(LARGE_SIZE + HEAVY_INSERTS);
-            gb.insert(0, string(LARGE_SIZE, 'x'));
-            gb.move_gap(LARGE_SIZE / 2); 
+            gb.insert(0, std::string(LARGE_SIZE, 'x'));
+            gb.move_gap(gb.size() / 2); 
             Timer t;
             for(int i=0; i<HEAVY_INSERTS; ++i) gb.insert(gb.size() / 2, 'A');
             return t.elapsed_ms();
@@ -589,7 +629,7 @@ void bench_heavy_typer() {
     {
         auto best = run_best_of([&]() {
             NaivePieceTable pt;
-            pt.insert(0, string(LARGE_SIZE, 'x'));
+            pt.insert(0, std::string(LARGE_SIZE, 'x'));
             Timer t;
             size_t mid = pt.size() / 2;
             for(int i=0; i<HEAVY_INSERTS; ++i) pt.insert(mid + i, "A");
@@ -614,10 +654,8 @@ void bench_heavy_typer() {
     {
         auto best = run_best_of([&]() {
             BiModalText bmt;
-            string chunk(4096, 'x');
-            for(int i=0; i<LARGE_SIZE/static_cast<int>(chunk.size()); ++i) bmt.insert(bmt.size(), chunk); // 5MB
-            bmt.optimize(); 
-
+            bmt.insert(0, std::string(LARGE_SIZE, 'x'));
+            bmt.optimize(); // 준비 단계에서 정리
             Timer t;
             size_t mid = bmt.size() / 2;
             for(int i=0; i<HEAVY_INSERTS; ++i) bmt.insert(mid, "A");
