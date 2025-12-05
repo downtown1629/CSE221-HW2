@@ -72,8 +72,8 @@ TypingStats run_best_typing(Func&& func) {
 // =========================================================
 //  Test Parameters
 // =========================================================
-const int INITIAL_SIZE = 20000000;
-const int INSERT_COUNT = 2000;
+const int INITIAL_SIZE = 5 * 1024 * 1024; // 5MB
+const int INSERT_COUNT = 1000;
 long long dummy_checksum = 0;
 
 // =========================================================
@@ -208,90 +208,14 @@ TypingStats bench_bimodal_once() {
     return {time_insert, time_read};
 }
 
-// =========================================================
-//  Scenarios
-// =========================================================
-
-void bench_heavy_typer() {
-    const int LARGE_SIZE = 2 * 1024 * 1024; // 2MB
-    const int HEAVY_INSERTS = 5000;
-    
-    cout << "\n[Scenario C: The Heavy Typer (N=2MB, Inserts=5000, best of "
-         << SCENARIO_REPEATS << ")]" << endl;
-    cout << "--------------------------------------------------------------" << endl;
-    cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
-    cout << "--------------------------------------------------------------" << endl;
-
-    {
-        auto best = run_best_of([&]() {
-            vector<char> v(LARGE_SIZE, 'x');
-            size_t mid = v.size() / 2;
-            Timer t;
-            for(int i=0; i<HEAVY_INSERTS; ++i) v.insert(v.begin() + mid, 'A');
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "std::vector" << setw(15) << best << "(Shift Hell)" << endl;
-    }
-
-    {
-        auto best = run_best_of([&]() {
-            SimpleGapBuffer gb(LARGE_SIZE + HEAVY_INSERTS);
-            gb.insert(0, string(LARGE_SIZE, 'x'));
-            gb.move_gap(LARGE_SIZE / 2); 
-            Timer t;
-            for(int i=0; i<HEAVY_INSERTS; ++i) gb.insert(gb.size() / 2, 'A');
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << best << "(Fastest)" << endl;
-    }
-
-    {
-        auto best = run_best_of([&]() {
-            SimplePieceTable pt;
-            pt.insert(0, string(LARGE_SIZE, 'x'));
-            Timer t;
-            size_t mid = pt.size() / 2;
-            for(int i=0; i<HEAVY_INSERTS; ++i) pt.insert(mid + i, "A");
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(List Walk)" << endl;
-    }
-
-#if ROPE_AVAILABLE
-    {
-        auto best = run_best_of([&]() {
-            crope r(LARGE_SIZE, 'x');
-            Timer t;
-            size_t mid = r.size() / 2;
-            for(int i=0; i<HEAVY_INSERTS; ++i) r.insert(mid, "A");
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "SGI Rope" << setw(15) << best << "(Consistent)" << endl;
-    }
-#endif
-
-    {
-        auto best = run_best_of([&]() {
-            BiModalText bmt;
-            string chunk(4096, 'x');
-            for(int i=0; i<512; ++i) bmt.insert(bmt.size(), chunk); // 2MB
-            bmt.optimize(); 
-
-            Timer t;
-            size_t mid = bmt.size() / 2;
-            for(int i=0; i<HEAVY_INSERTS; ++i) bmt.insert(mid, "A");
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "BiModalText" << setw(15) << best << "(Competitive)" << endl;
-    }
-}
 
 void bench_deletion() {
-    const int INITIAL_N = 500000;
+    const int INITIAL_N = 5 * 1024 * 1024;
     const int DELETE_OPS = 10000; 
 
-    cout << "\n[Scenario D: The Backspacer (Backspace 10k times, best of "
-         << SCENARIO_REPEATS << ")]" << endl;
+    cout << "\n[Scenario D: The Backspacer (Backspace " << DELETE_OPS
+         << " times, best of " << SCENARIO_REPEATS << ")]" << endl;
+    cout << "  - N=" << (INITIAL_N / 1024 / 1024) << "MB" << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
@@ -362,10 +286,10 @@ void bench_deletion() {
 }
 
 void bench_mixed_workload() {
-    const int N = 200000;
+    const int N = 5 * 1024 * 1024;
     const int ITERATIONS = 1000; 
 
-    cout << "\n[Scenario E: The Refactorer (Random Read & Edit, best of "
+    cout << "\n[Scenario E: The Refactorer (" << (N / 1024 / 1024) << "MB Random Read & Edit, best of "
          << SCENARIO_REPEATS << ")]" << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
@@ -384,7 +308,7 @@ void bench_mixed_workload() {
             dummy_checksum += sum;
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "std::string" << setw(15) << best << "(Fast Read)" << endl;
+        cout << left << setw(18) << "std::string" << setw(15) << best << "(O(N) Data Move)" << endl;
     }
 
     {
@@ -401,7 +325,7 @@ void bench_mixed_workload() {
             dummy_checksum += sum;
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << best << "(Gap Thrash)" << endl;
+        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << best << "(Locality Win)" << endl;
     }
 
     {
@@ -418,7 +342,7 @@ void bench_mixed_workload() {
             dummy_checksum += sum;
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(Slow Search)" << endl;
+        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(List Scan)" << endl;
     }
 
 #if ROPE_AVAILABLE
@@ -435,7 +359,7 @@ void bench_mixed_workload() {
             dummy_checksum += sum;
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SGI Rope" << setw(15) << best << "(Balanced)" << endl;
+        cout << left << setw(18) << "SGI Rope" << setw(15) << best << "(Pointer Chase)" << endl;
     }
 #endif
 
@@ -456,17 +380,78 @@ void bench_mixed_workload() {
             dummy_checksum += sum;
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "BiModalText" << setw(15) << best << "(Balanced)" << endl;
+        cout << left << setw(18) << "BiModalText" << setw(15) << best << "(Optimized LogN)" << endl;
     }
 }
 
+void bench_typing_mode() {
+    struct TypingRow {
+        string label;
+        bool measure_insert;
+        bool measure_read;
+        TypingStats stats;
+        string note;
+    };
+
+    vector<TypingRow> rows;
+    rows.push_back({"std::vector", true, true, run_best_typing(bench_vector_once), "(O(N) shift per insert)"});
+    rows.push_back({"std::string", true, true, run_best_typing(bench_string_once), "(Baseline, contiguous)"});
+    rows.push_back({"SimpleGapBuffer", true, true, run_best_typing(bench_simple_gap_once), "(Gap move, occasional expand)"});
+    rows.push_back({"SimplePieceTable", false, true, run_best_typing(bench_piece_table_once), "(Read only; search O(N))"});
+#if ROPE_AVAILABLE
+    rows.push_back({"SGI Rope", true, true, run_best_typing(bench_rope_once), "(Tree concat/rebal O(log N))"});
+#else
+    rows.push_back({"SGI Rope", false, false, TypingStats{0, 0}, "(No rope)"});
+#endif
+    rows.push_back({"BiModalText", true, true, run_best_typing(bench_bimodal_once), "(Skiplist + gap split/merge)"});
+
+    auto print_section = [&](const string& title, bool show_insert) {
+        cout << "\n[Scenario: Typing Mode - " << title
+             << " (best of " << SCENARIO_REPEATS << ")]" << endl;
+        cout << "  - N=" << (INITIAL_SIZE / 1024 / 1024) << "MB";
+        if (show_insert) {
+            cout << ", Inserts=" << INSERT_COUNT;
+        }
+        cout << endl;
+        cout << "--------------------------------------------------------------" << endl;
+        cout << left << setw(18) << "Structure"
+             << setw(15) << (show_insert ? "Insert (ms)" : "Read (ms)")
+             << "Note" << endl;
+        cout << "--------------------------------------------------------------" << endl;
+
+        cout << fixed << setprecision(6);
+        for (const auto& row : rows) {
+            cout << left << setw(18) << row.label;
+            if (show_insert) {
+                if (row.measure_insert) {
+                    cout << setw(15) << row.stats.insert_ms;
+                } else {
+                    cout << setw(15) << "N/A";
+                }
+            } else {
+                if (row.measure_read) {
+                    cout << setw(15) << row.stats.read_ms;
+                } else {
+                    cout << setw(15) << "N/A";
+                }
+            }
+            cout << row.note << endl;
+        }
+        cout.unsetf(ios::floatfield);
+        cout << setprecision(6);
+    };
+
+    print_section("Insert", true);
+    print_section("Read", false);
+}
+
 void bench_random_access() {
-    const int TEST_SIZE = 100000; 
+    const int TEST_SIZE = 5 * 1024 * 1024; 
     const int RAND_INSERTS = 5000; 
     
     cout << "\n[Scenario: Random Cursor Movement & Insertion (best of "
          << SCENARIO_REPEATS << ")]" << endl;
-    cout << "  - N=" << TEST_SIZE << ", Inserts=" << RAND_INSERTS << endl;
+    cout << "  - N=" << (TEST_SIZE / 1024 / 1024) << "MB, Inserts=" << RAND_INSERTS << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
@@ -531,114 +516,120 @@ void bench_random_access() {
 #endif
 
     {
-        struct BiModalRandomStats {
-            double edit_ms;
-            double optimize_ms;
-            double scan_ms;
-        };
+        double best_total = std::numeric_limits<double>::infinity();
 
-        auto best = [&]() {
-            BiModalRandomStats best_stats{
-                std::numeric_limits<double>::infinity(),
-                std::numeric_limits<double>::infinity(),
-                std::numeric_limits<double>::infinity()
-            };
+        for (int attempt = 0; attempt < SCENARIO_REPEATS; ++attempt) {
+            mt19937 local_gen = gen;
+            auto local_dist = dist;
+            BiModalText bmt;
+            for(int i=0; i<TEST_SIZE/1000; ++i) bmt.insert(0, string(1000, 'x'));
 
-            for (int attempt = 0; attempt < SCENARIO_REPEATS; ++attempt) {
-                mt19937 local_gen = gen;
-                auto local_dist = dist;
-                BiModalText bmt;
-                for(int i=0; i<TEST_SIZE/1000; ++i) bmt.insert(0, string(1000, 'x'));
-
-                Timer edit_timer;
-                edit_timer.reset();
-                for (int i = 0; i < RAND_INSERTS; ++i) {
-                    size_t pos = local_dist(local_gen) % bmt.size();
-                    bmt.insert(pos, "A");
-                }
-                double edit_ms = edit_timer.elapsed_ms();
-
-                Timer opt_timer;
-                opt_timer.reset();
-                bmt.optimize();
-                double optimize_ms = opt_timer.elapsed_ms();
-
-                long long sum = 0;
-                Timer scan_timer;
-                scan_timer.reset();
-                bmt.scan([&](char c) { sum += c; });
-                double scan_ms = scan_timer.elapsed_ms();
-                dummy_checksum += sum;
-
-                best_stats.edit_ms = std::min(best_stats.edit_ms, edit_ms);
-                best_stats.optimize_ms = std::min(best_stats.optimize_ms, optimize_ms);
-                best_stats.scan_ms = std::min(best_stats.scan_ms, scan_ms);
+            Timer edit_timer;
+            edit_timer.reset();
+            for (int i = 0; i < RAND_INSERTS; ++i) {
+                size_t pos = local_dist(local_gen) % bmt.size();
+                bmt.insert(pos, "A");
             }
+            double edit_ms = edit_timer.elapsed_ms();
 
-            return best_stats;
-        }();
+            Timer opt_timer;
+            opt_timer.reset();
+            bmt.optimize();
+            double optimize_ms = opt_timer.elapsed_ms();
 
-        cout << left << setw(18) << "BiModalText (Insert)" 
-             << setw(15) << best.edit_ms 
-             << "(Log Search)" << endl;
-        cout << left << setw(18) << "BiModalText optimize()" 
-             << setw(15) << best.optimize_ms 
-             << "(Post-edit)" << endl;
-        cout << left << setw(18) << "BiModalText scan()" 
-             << setw(15) << best.scan_ms 
-             << "(Read throughput)" << endl;
+            long long sum = 0;
+            Timer scan_timer;
+            scan_timer.reset();
+            bmt.scan([&](char c) { sum += c; });
+            double scan_ms = scan_timer.elapsed_ms();
+            dummy_checksum += sum;
+
+            best_total = std::min(best_total, edit_ms + optimize_ms + scan_ms);
+        }
+
+        cout << left << setw(18) << "BiModalText" 
+             << setw(15) << best_total 
+             << "(Insert+optimize+scan)" << endl;
+    }
+}
+
+void bench_heavy_typer() {
+    const int LARGE_SIZE = 100 * 1024 * 1024; // 5MB
+    const int HEAVY_INSERTS = 5000;
+    
+    cout << "\n[Scenario: The Heavy Typer (best of "
+         << SCENARIO_REPEATS << ")]" << endl;
+    cout << "  - N=" << (LARGE_SIZE / 1024 / 1024) << "MB, Inserts=" << HEAVY_INSERTS << endl;
+    cout << "--------------------------------------------------------------" << endl;
+    cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
+    cout << "--------------------------------------------------------------" << endl;
+
+    {
+        auto best = run_best_of([&]() {
+            vector<char> v(LARGE_SIZE, 'x');
+            size_t mid = v.size() / 2;
+            Timer t;
+            for(int i=0; i<HEAVY_INSERTS; ++i) v.insert(v.begin() + mid, 'A');
+            return t.elapsed_ms();
+        });
+        cout << left << setw(18) << "std::vector" << setw(15) << best << "(O(N) shifts)" << endl;
+    }
+
+    {
+        auto best = run_best_of([&]() {
+            SimpleGapBuffer gb(LARGE_SIZE + HEAVY_INSERTS);
+            gb.insert(0, string(LARGE_SIZE, 'x'));
+            gb.move_gap(LARGE_SIZE / 2); 
+            Timer t;
+            for(int i=0; i<HEAVY_INSERTS; ++i) gb.insert(gb.size() / 2, 'A');
+            return t.elapsed_ms();
+        });
+        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << best << "(Gap move/expand)" << endl;
+    }
+
+    {
+        auto best = run_best_of([&]() {
+            SimplePieceTable pt;
+            pt.insert(0, string(LARGE_SIZE, 'x'));
+            Timer t;
+            size_t mid = pt.size() / 2;
+            for(int i=0; i<HEAVY_INSERTS; ++i) pt.insert(mid + i, "A");
+            return t.elapsed_ms();
+        });
+        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(Node split/join)" << endl;
+    }
+
+#if ROPE_AVAILABLE
+    {
+        auto best = run_best_of([&]() {
+            crope r(LARGE_SIZE, 'x');
+            Timer t;
+            size_t mid = r.size() / 2;
+            for(int i=0; i<HEAVY_INSERTS; ++i) r.insert(mid, "A");
+            return t.elapsed_ms();
+        });
+        cout << left << setw(18) << "SGI Rope" << setw(15) << best << "(O(log N) rebal)" << endl;
+    }
+#endif
+
+    {
+        auto best = run_best_of([&]() {
+            BiModalText bmt;
+            string chunk(4096, 'x');
+            for(int i=0; i<LARGE_SIZE/static_cast<int>(chunk.size()); ++i) bmt.insert(bmt.size(), chunk); // 5MB
+            bmt.optimize(); 
+
+            Timer t;
+            size_t mid = bmt.size() / 2;
+            for(int i=0; i<HEAVY_INSERTS; ++i) bmt.insert(mid, "A");
+            return t.elapsed_ms();
+        });
+        cout << left << setw(18) << "BiModalText" << setw(15) << best << "(Skiplist + gap split)" << endl;
     }
 }
 
 int main() {
-    cout << "==============================================================" << endl;
-    cout << " Benchmark: N=" << INITIAL_SIZE << ", Inserts=" << INSERT_COUNT
-         << " (Typing Mode, best of " << SCENARIO_REPEATS << ")" << endl;
-    cout << "==============================================================" << endl;
-    cout << left << setw(18) << "Structure" 
-         << setw(15) << "Insert (ms)" 
-         << setw(15) << "Read (ms)" 
-         << "Note" << endl;
-    cout << "--------------------------------------------------------------" << endl;
-    
-struct TypingRow {
-    string label;
-    bool measure_insert;
-    bool measure_read;
-    TypingStats stats;
-    string note;
-};
-    
-    vector<TypingRow> rows;
-    rows.push_back({"std::vector", true, true, run_best_typing(bench_vector_once), "(O(N) Shift)"});
-    rows.push_back({"std::string", true, true, run_best_typing(bench_string_once), "(Baseline)"});
-    rows.push_back({"SimpleGapBuffer", true, true, run_best_typing(bench_simple_gap_once), "(Ideal Typing)"});
-    rows.push_back({"SimplePieceTable", false, true, run_best_typing(bench_piece_table_once), "(Read only)"});
-#if ROPE_AVAILABLE
-    rows.push_back({"SGI Rope", true, true, run_best_typing(bench_rope_once), "(Tree O(logN))"});
-#else
-    rows.push_back({"SGI Rope", false, false, TypingStats{0, 0}, "(Not supported)"});
-#endif
-    rows.push_back({"BiModalText", true, true, run_best_typing(bench_bimodal_once), "(Target)"});
-
-    cout << fixed << setprecision(6);
-    for (const auto& row : rows) {
-        cout << left << setw(18) << row.label;
-        if (row.measure_insert) {
-            cout << setw(15) << row.stats.insert_ms;
-        } else {
-            cout << setw(15) << "N/A";
-        }
-        if (row.measure_read) {
-            cout << setw(15) << row.stats.read_ms;
-        } else {
-            cout << setw(15) << "N/A";
-        }
-        cout << row.note << endl;
-    }
-    cout.unsetf(ios::floatfield);
-    cout << setprecision(6);
-
+    bench_typing_mode();
     bench_heavy_typer();
     bench_deletion();
     bench_mixed_workload();
