@@ -246,38 +246,22 @@ struct Node {
     size_t* span;
     int level;
 
-private:
-    // [최적화 핵심] 실제 메모리 덩어리를 가리키는 포인터
-    char* memory_block;
-
-public:
-    Node(int lvl) : data(GapNode{}), level(lvl), memory_block(nullptr) {
-        // 1. 크기 계산
-        size_t next_size = sizeof(Node*) * lvl;
-        size_t span_size = sizeof(size_t) * lvl;
-        
-        // 2. 단일 할당
-        memory_block = new char[next_size + span_size];
-
-        // 3. 포인터 연결
-        next = reinterpret_cast<Node**>(memory_block);
-        span = reinterpret_cast<size_t*>(memory_block + next_size);
-
-        // 4. [최적화] 한 번에 0으로 초기화 (nullptr == 0 가정)
-        // next 배열은 nullptr로, span 배열은 0으로 초기화됨
-        std::memset(memory_block, 0, next_size + span_size);
-    }
-
-    ~Node() {
-        // 할당된 큰 덩어리 하나만 해제하면 됨
-        delete[] memory_block;
-    }
+    Node(int lvl) : data(GapNode{}), next(nullptr), span(nullptr), level(lvl) {}
+    ~Node() = default;
 
     // Rule of Five 유지 (복사/이동 금지)
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
     Node(Node&&) = delete;
     Node& operator=(Node&&) = delete;
+
+    void initialize_links(char* storage) {
+        size_t next_size = sizeof(Node*) * level;
+        size_t span_size = sizeof(size_t) * level;
+        next = reinterpret_cast<Node**>(storage);
+        span = reinterpret_cast<size_t*>(storage + next_size);
+        std::memset(storage, 0, next_size + span_size);
+    }
 
     size_t content_size() const {
         return std::visit([](auto const& n) { return n.size(); }, data);

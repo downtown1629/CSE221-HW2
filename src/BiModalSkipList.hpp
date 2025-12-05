@@ -3,6 +3,7 @@
 #include <array>
 #include <random>
 #include <cassert>
+#include <memory_resource>
 #include "Nodes.hpp"
 
 // 스킵 리스트용 상수들
@@ -12,9 +13,8 @@ constexpr double P = 0.25;
 
 class BiModalText {
 public:
-    BiModalText() {
-        head = new Node(MAX_LEVEL);
-        total_size = 0;
+    BiModalText() : head(nullptr), total_size(0) {
+        head = create_node(MAX_LEVEL);
         std::random_device rd;
         gen = std::mt19937(rd());
         dist = std::uniform_real_distribution<>(0.0, 1.0);
@@ -23,7 +23,8 @@ public:
     ~BiModalText() {
         clear();
         if (head) {   // 안전 장치
-            delete head; 
+            destroy_node(head);
+            head = nullptr;
         }
     }
 
@@ -175,7 +176,7 @@ public:
         // [리팩토링] 빈 리스트 특수 케이스 -> Early Return 처리
         if (!target) {
             if (total_size == 0) {
-                target = new Node(random_level());
+                target = create_node(random_level());
                 std::get<GapNode>(target->data).insert(0, s); // GapNode임을 확신하므로 바로 접근
                 
                 for (int i = 0; i < target->level; ++i) {
@@ -324,7 +325,7 @@ public:
                 curr->span[0] = next_node->span[0];
 
                 // 4. 메모리 해제
-                delete next_node;
+                destroy_node(next_node);
                 
                 // --- 병합 로직 끝 ---
 
@@ -349,7 +350,7 @@ public:
         
         while (curr) {
             Node* next = curr->next[0];
-            delete curr; // 데이터 노드만 삭제 (279번째 줄 추정)
+            destroy_node(curr); // 데이터 노드만 삭제 (279번째 줄 추정)
             curr = next;
         }
 
@@ -405,10 +406,33 @@ private:
     static constexpr int MAX_LEVEL = 16;
     static constexpr size_t NODE_MAX_SIZE = 4096; 
     
+    std::pmr::unsynchronized_pool_resource pool;
     Node* head;
     size_t total_size;
     std::mt19937 gen;
     std::uniform_real_distribution<> dist;
+
+    size_t node_allocation_size(int level) const {
+        size_t next_bytes = sizeof(Node*) * level;
+        size_t span_bytes = sizeof(size_t) * level;
+        return sizeof(Node) + next_bytes + span_bytes;
+    }
+
+    Node* create_node(int level) {
+        size_t total_bytes = node_allocation_size(level);
+        void* raw = pool.allocate(total_bytes, alignof(Node));
+        auto* node = new(raw) Node(level);
+        char* aux = static_cast<char*>(raw) + sizeof(Node);
+        node->initialize_links(aux);
+        return node;
+    }
+
+    void destroy_node(Node* node) {
+        if (!node) return;
+        size_t total_bytes = node_allocation_size(node->level);
+        node->~Node();
+        pool.deallocate(node, total_bytes, alignof(Node));
+    }
 
     void rebuild_spans() {
         if (!head) return;
@@ -520,7 +544,7 @@ private:
         int new_level = random_level();
         if (new_level > u_levels) new_level = u_levels;
         
-        Node* v = new Node(new_level);
+        Node* v = create_node(new_level);
         
         try {
             // 3. split_right()를 사용하여 u에서 v로 데이터 이동
@@ -539,7 +563,7 @@ private:
         } catch (...) {
             // v 생성 이후 split 과정에서 예외가 나면
             // v를 정리한 뒤 예외를 그대로 다시 던져서 상위에서 처리하게 한다.
-            delete v;
+            destroy_node(v);
             throw;
         }
         
@@ -647,7 +671,7 @@ private:
                 update[i]->span[i] = target->span[i];
             }
         }
-        delete target;
+        destroy_node(target);
     }
 
 

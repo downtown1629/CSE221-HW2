@@ -41,7 +41,7 @@ public:
     }
 };
 
-constexpr int SCENARIO_REPEATS = 6;
+constexpr int SCENARIO_REPEATS = 8;
 
 template <typename Func>
 double run_best_of(Func&& func) {
@@ -72,8 +72,8 @@ TypingStats run_best_typing(Func&& func) {
 // =========================================================
 //  Test Parameters
 // =========================================================
-const int INITIAL_SIZE = 5000000;
-const int INSERT_COUNT = 10000;
+const int INITIAL_SIZE = 8000000;
+const int INSERT_COUNT = 5000;
 long long dummy_checksum = 0;
 
 // =========================================================

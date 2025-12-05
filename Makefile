@@ -1,25 +1,27 @@
-CXXFLAGS   = -std=c++17 -O3 -march=native -Wall -Wextra -Isrc
-DEBUGFLAGS = -std=c++17 -Og -march=native -g -fsanitize=address -Wall -Wextra -Isrc
+MAIN_FLAGS   = -std=c++20 -O3 -march=native -Wall -Wextra -Isrc
+FUZZER_FLAGS = -std=c++20 -Og -march=native -g -fsanitize=address -Wall -Wextra -Isrc
+
+SRC_DIR   = src
+MAIN_SRC  = $(SRC_DIR)/benchmark.cpp
+FUZZ_SRC  = $(SRC_DIR)/fuzzer.cpp
 
 TARGET = main
+FUZZER = fuzzer
 
-SRC_DIR  = src
-SOURCES  = $(SRC_DIR)/benchmark.cpp
+.PHONY: all run clean debug
 
-# 항상 다시 빌드되도록
-.PHONY: $(TARGET) all run clean debug
+all: $(TARGET) $(FUZZER)
 
-all: $(TARGET)
+$(TARGET): $(MAIN_SRC)
+	$(CXX) $(MAIN_FLAGS) -o $@ $<
 
-$(TARGET):
-	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES)
+$(FUZZER): $(FUZZ_SRC)
+	$(CXX) $(FUZZER_FLAGS) -o $@ $<
 
 run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(FUZZER)
 
-# debug 빌드
-debug: CXXFLAGS=$(DEBUGFLAGS)
-debug: clean $(TARGET)
+debug: clean $(FUZZER)
