@@ -1,7 +1,6 @@
 #include <iostream>
 #include <vector>
 #include <list>
-#include <deque>
 #include <string>
 #include <chrono>
 #include <numeric>
@@ -94,26 +93,6 @@ TypingStats bench_vector_once() {
     long long sum = 0;
     t.reset();
     for (char c : v) sum += c;
-    double time_read = t.elapsed_ms();
-    dummy_checksum += sum;
-
-    return {time_insert, time_read};
-}
-
-TypingStats bench_deque_once() {
-    deque<char> d(INITIAL_SIZE, 'x');
-    Timer t;
-
-    size_t mid = d.size() / 2;
-    t.reset();
-    for (int i = 0; i < INSERT_COUNT; ++i) {
-        d.insert(d.begin() + mid, 'A');
-    }
-    double time_insert = t.elapsed_ms();
-
-    long long sum = 0;
-    t.reset();
-    for (char c : d) sum += c;
     double time_read = t.elapsed_ms();
     dummy_checksum += sum;
 
@@ -325,6 +304,20 @@ void bench_deletion() {
             return t.elapsed_ms();
         });
         cout << left << setw(18) << "std::vector" << setw(15) << best << "(Shift)" << endl;
+    }
+
+    {
+        auto best = run_best_of([&]() {
+            SimpleGapBuffer gb(INITIAL_N + DELETE_OPS);
+            gb.insert(0, string(INITIAL_N, 'x'));
+            size_t pos = gb.size() / 2;
+            Timer t;
+            for (int i = 0; i < DELETE_OPS; ++i) {
+                gb.erase(pos, 1);
+            }
+            return t.elapsed_ms();
+        });
+        cout << left << setw(18) << "SimpleGapBuffer" << setw(15) << best << "(Gap Expand)" << endl;
     }
 
     {
@@ -617,7 +610,6 @@ struct TypingRow {
     
     vector<TypingRow> rows;
     rows.push_back({"std::vector", true, true, run_best_typing(bench_vector_once), "(O(N) Shift)"});
-    rows.push_back({"std::deque", true, true, run_best_typing(bench_deque_once), "(Fragmented)"});
     rows.push_back({"std::string", true, true, run_best_typing(bench_string_once), "(Baseline)"});
     rows.push_back({"SimpleGapBuffer", true, true, run_best_typing(bench_simple_gap_once), "(Ideal Typing)"});
     rows.push_back({"SimplePieceTable", false, true, run_best_typing(bench_piece_table_once), "(Read only)"});

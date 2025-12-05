@@ -1,5 +1,5 @@
 MAIN_FLAGS   = -std=c++20 -O3 -march=native -Wall -Wextra -Isrc
-FUZZER_FLAGS = -std=c++20 -Og -march=native -g -fsanitize=address -Wall -Wextra -Isrc
+FUZZER_FLAGS = -std=c++20 -Og -march=native -g -fsanitize=address -Wall -Wextra -Isrc -DBIMODAL_DEBUG=ON
 
 SRC_DIR   = src
 MAIN_SRC  = $(SRC_DIR)/benchmark.cpp

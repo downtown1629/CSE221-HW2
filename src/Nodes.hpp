@@ -136,15 +136,13 @@ struct GapNode {
         
         std::vector<char> new_buf(new_cap); // 0으로 초기화됨 (낭비)
 
-        // [After] 초기화 없이 메모리만 확보
-        //std::vector<char> new_buf;
-        //new_buf.reserve(new_cap); 
-        
         // Gap 앞부분 복사
         std::copy(buf.begin(), buf.begin() + gap_start, new_buf.begin());
         
         // Gap 뒷부분 복사 (새 버퍼의 끝쪽에 배치)
-        std::copy(buf.begin() + gap_end, buf.end(), new_buf.end() - back_part_size);
+        if (back_part_size > 0) {
+            std::copy(buf.begin() + gap_end, buf.end(), new_buf.end() - back_part_size);
+        }
         
         buf = std::move(new_buf);
         gap_end = new_cap - back_part_size; 

@@ -55,6 +55,14 @@ public:
         gap_start += s.size();
     }
 
+    void erase(size_t pos, size_t len = 1) {
+        size_t logical_size = size();
+        if (pos >= logical_size || len == 0) return;
+        if (pos + len > logical_size) len = logical_size - pos;
+        move_gap(pos);
+        gap_end += len;
+    }
+
     char at(size_t i) const {
         return (i < gap_start) ? buf[i] : buf[i + (gap_end - gap_start)];
     }
@@ -222,4 +230,3 @@ public:
         return '\0';
     }
 };
-
