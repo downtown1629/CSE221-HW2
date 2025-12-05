@@ -28,23 +28,9 @@
   * **Write Mode (GapNode):** 커서 기반 편집을 위해 내부에 Gap을 유지한다. 데이터 이동 시 `std::memmove`를 사용하여 하드웨어 가속을 활용하며, 삽입 위치가 변경될 때만 국소적으로 Gap을 이동시킨다.
   * **Read Mode (CompactNode):** 편집이 끝나고 분석 단계로 전환 시(`optimize`), Gap을 제거하고 `shrink_to_fit()`을 호출하여 메모리 사용량을 최소화한다. 이는 `std::vector`와 동일한 연속 메모리 접근(Spatial Locality)을 보장한다.
 
-### 2.2 Memory Layout Optimization (Single Allocation)
+### 2.2 Memory Layout Optimization (PMR + Single Allocation)
 
-초기 구현에서는 Skip List의 레벨 관리를 위해 `next` 포인터 배열과 `span` 거리 배열을 각각 `new`로 할당했다. 그러나 프로파일링 결과, 이는 노드 생성 시 잦은 `malloc` 호출 오버헤드를 발생시키고 힙 메모리 파편화를 가중시켜 랜덤 삽입 성능을 저하시키는 주원인으로 지목되었다.
-
-이를 해결하기 위해 본 구현에서는 Single Block Allocation 기법을 도입했다. `next` 배열과 `span` 배열을 별도로 할당하지 않고, 필요한 총 크기만큼 하나의 연속된 메모리 블록을 할당한 뒤 포인터 연산을 통해 구획을 나누어 사용한다.
-
-```cpp
-// Implementation Detail
-Node(int lvl) {
-    // Allocate next[] and span[] in a single contiguous block
-    size_t alloc_size = (sizeof(Node*) + sizeof(size_t)) * lvl;
-    memory_block = new char[alloc_size];
-    std::memset(memory_block, 0, alloc_size); // Batch initialization
-}
-```
-
-`next` 포인터 배열과 `span` 거리 배열을 한 번의 `new`로 할당하고 `std::memset`으로 초기화함으로써, 생성 속도를 높이고 메모리 지역성을 극대화했다. 그 결과, std::vector 대비 힙 관리 오버헤드를 획기적으로 줄이며 편집 성능을 개선했다.
+현재 구현은 `std::pmr::unsynchronized_pool_resource`를 사용하여 노드 메모리를 풀에서 재사용한다. `Node`는 한 번의 placement new로 생성되며, 레벨 크기에 맞춰 `next[]`와 `span[]`을 하나의 연속 블록으로 초기화한다. 별도 `new` 호출을 피하고 풀을 통해 정렬된 청크를 재활용함으로써, 노드 생성/파괴 시의 malloc 오버헤드와 파편화를 줄이고 캐시 지역성을 확보했다.
 
 ### 2.3 Skip List Operations and Lifecycle Management
 본 자료구조는 노드의 분할, 삭제, 병합 과정에서 발생하는 오버헤드를 최소화하기 위해 지연(Lazy) 전략과 로컬 최적화 기법을 적극 활용한다.
@@ -56,23 +42,24 @@ Node(int lvl) {
  * Lazy Merge Strategy: 삭제 연산으로 인해 작아진 노드들을 즉시 병합(Eager Merge)하는 대신, optimize() 호출 시점에 일괄 병합하는 지연 전략을 적용했다. 이는 텍스트 편집기에서 빈번한 백스페이스 입력 시 발생하는 불필요한 메모리 병합 레이턴시를 방지하여 쓰기 처리량(Throughput)을 유지하고, 이후 분석 단계에서는 파편화가 해소된 Compact Node를 제공하여 최적의 읽기 성능을 달성하도록 한다.
 
 
-### 2.4 Zero-Overhead Iterator & SIMD Scan
+### 2.4 Iterator & Scan
 
-`src/BiModalSkipList.hpp`의 Iterator는 현재 노드의 데이터 포인터와 길이를 캐싱(`cached_ptr`, `cached_len`)하여, 반복문마다 `std::visit`을 호출하는 비용을 제거한다. CompactNode라면 `cached_ptr[offset]`으로 즉시 접근하고, GapNode는 `at()`으로 폴백한다. 또한 내부 `scan(Func)` 루틴은 노드당 한 번만 `std::visit`을 수행한 뒤 `for` 루프에서 연속 데이터를 제공하므로, 컴파일러가 `func`를 적극적으로 인라인·벡터화할 수 있다. 이 조합 덕분에 `std::vector` 수준의 순차 읽기 대역폭을 유지하면서도 Skip List의 위치 기반 편집 이점을 살렸다.
+Iterator는 노드 타입별 포인터와 길이를 캐싱하여 `std::visit` 호출을 최소화한다. 내부 `scan(Func)` 루틴은 노드당 한 번만 `std::visit`을 수행하고, GapNode는 앞/뒤 두 구간을 `std::span` 뷰(핫패스 inline)로 순회한다. 이를 통해 연속 메모리에 근접한 순차 읽기 대역폭을 확보하면서도 skip list의 위치 기반 편집 이점을 유지한다.
 
-### 2.5 Deterministic Span Maintenance
+### 2.5 Incremental Span Maintenance
 
-최근 수정에서는 모든 변이 연산 뒤에 `rebuild_spans()`를 호출하여 스팬 메타데이터를 항상 레벨 0 순서에서 재계산한다. 과거에는 각 연산에서 국소적으로 `span`을 조정했지만, 노드 분할·병합이 겹치면 누적 오차가 생겨 `at()`과 Iterator 사이가 어긋났다. 이제는
+현재는 삽입/삭제/분할/제거 경로에서 span을 증분적으로 갱신하며, `rebuild_spans()`는 디버그 검증용으로만 사용한다. `find_node()`가 모든 레벨의 선행자를 수집하고, `split_node()`와 `remove_node()`가 span 보존 규칙에 따라 점프 거리를 재분배한다. 디버그 빌드의 `debug_verify_spans()`가 노드별 실제 거리와 저장된 span을 교차 검증해 불변식을 보장한다.
 
-1. `find_node()`가 `update`/`rank` 배열을 채워 안전하게 분할 동작을 준비하고,
-2. `split_node()`와 `remove_node()`가 연결 정보를 갱신한 뒤,
-3. `rebuild_spans()`가 감시자 노드 `head`부터 전 레벨 span을 새로 쓰는
+### 2.6 Baseline Summary
 
-파이프라인으로 재구성되어, 시드에 독립적인 결정론적 동작을 보장한다.
+비교/검증용으로 다음 구현을 포함한다.
+- **std::vector**: 연속 배열, 최상의 순차 읽기. 중간 삽입/삭제는 $O(N)$ 이동.
+- **Simple Gap Buffer**: 커서 근처 편집에 특화. 커서가 크게 이동하면 gap 이동 비용이 커짐.
+- **Naive Piece Table**: 메타데이터로 삽입/삭제 표현. 조각난 버퍼로 탐색/캐시 연속성이 떨어짐.
+- **SGI Rope**: 트리 기반 $O(\log N)$ 편집. 포인터 체이싱으로 순차 읽기/메모리 오버헤드가 큼.
+- **Bi-Modal Skip List**: skip list 탐색 + gap/compact 전환으로 랜덤 편집과 순차 읽기 간 균형을 목표로 함.
 
-### 2.6 Verification Components in the Repository
-
-`src/Baselines.hpp`에는 정밀 비교를 위한 `SimpleGapBuffer`와 `SimplePieceTable` 구현이 포함되어 있어, 벤치마크 및 디버깅 단계에서 참조 동작을 제공한다. `src/fuzzer.cpp`는 다음과 같은 회귀 도구를 제공한다.
+`src/benchmark.cpp`는 최신 시나리오(타이핑 삽입 10MB, 순차 읽기 100MB, 헤비 타이퍼 100MB, 백스페이스/랜덤 편집 10MB 등)에서 위 구조들을 비교한다. `src/fuzzer.cpp`는 다음과 같은 회귀 도구를 제공한다.
 
 - `simple_sanity_tests`, `split_merge_stress_test`, `random_edit_test`: BiModalText를 `std::string` 참조 모델과 비교하며 삽입·삭제·최적화 연산을 검증한다.
 - `Fuzzer`: 균형 잡힌 삽입/삭제/최적화/읽기 요청을 수천 번 던져, `InvariantChecker`로 `size()`, `iterator`, `to_string()` 일관성을 보장한다.
@@ -84,15 +71,16 @@ Node(int lvl) {
 | Data Structure | Insert (Rand) | Read (Scan) | Cache Locality | Memory Overhead |
 | :--- | :--- | :--- | :--- | :--- |
 | **std::vector** | $O(N)$ | Best | Excellent | Low |
-| **std::list** | $O(1)$ | Poor | Poor | High (Pointers) |
-| **Simple Gap Buffer** | $O(N)$ (Move) | Good | Good | Low |
-| **Piece Table** | $O(1)$ metadata | Fair | Fair | Medium (Lists) |
-| **Rope (Tree)** | $O(\log N)$ | Fair | Poor (Tree) | High (Nodes) |
+| **Simple Gap Buffer** | $O(N)$ (move gap) | Good | Good (contiguous except gap) | Low |
+| **Naive Piece Table** | $O(N)$ (search/split) | Fair | Fair (fragments) | Medium |
+| **SGI Rope** | $O(\log N)$ | Fair | Poor (pointer chasing) | High |
 | **Bi-Modal Skip List** | **$O(\log N)$** | **Excellent** | **High** | **Medium** |
 
-  * **vs. Simple Gap Buffer:** 단일 Gap Buffer는 커서 이동 시 전체 데이터를 이동해야 하지만, Bi-Modal 구조는 해당 위치의 노드만 수정하므로 랜덤 액세스 편집에 강력하다. `SimpleGapBuffer` baseline으로 구현·검증했다.
-  * **vs. Piece Table:** Piece Table은 메타데이터만 조작해 빠르지만, 외부 버퍼 접근이 잦아 캐시 연속성이 떨어진다. Bi-Modal은 `optimize()` 후 모든 노드가 CompactNode여서 캐시 히트율이 높다.
-  * **vs. Rope:** Rope는 이진 트리 구조로 인해 순차 읽기 시 'Pointer Chasing'이 발생하여 느리다. 반면, 제안 구조는 `optimize()` 후 노드 내부가 연속적이므로 읽기 속도가 월등하다.
+  * **std::vector:** 연속 메모리로 최상의 읽기 속도를 제공하지만, 중간 삽입/삭제는 $O(N)$ 이동 비용이 발생한다.
+  * **Simple Gap Buffer:** 커서 근처 삽입/삭제는 빠르지만, 커서가 크게 이동하면 gap 이동 비용이 $O(N)$까지 커진다.
+  * **Naive Piece Table:** 메타데이터 조작으로 삽입/삭제를 표현하지만, 조각난 버퍼를 따라가야 해서 검색/탐색이 $O(N)$이고 캐시 연속성이 떨어진다.
+  * **SGI Rope:** 트리 기반으로 $O(\log N)$ 삽입/삭제가 가능하지만, 포인터 체이싱으로 순차 읽기가 느리고 메모리 오버헤드가 크다.
+  * **Bi-Modal Skip List:** skip list의 $O(\log N)$ 탐색과 gap/compact 전환을 결합해, 랜덤 편집과 순차 읽기 모두에서 균형 잡힌 성능을 목표로 한다.
 
 ## 4. Evaluation and Analysis
 
@@ -100,35 +88,25 @@ Node(int lvl) {
 
   * **Environment:** Ubuntu Linux (x86_64), Intel Core Processor
   * **Compiler:** clang++-21 for release benchmarks (`-O3 -march=native`), g++-11 for sanitizer/fuzzer runs (`-Og -fsanitize=address,undefined`)
-  * **Benchmark Harness:** `src/benchmark.cpp` compares BiModalText against `std::vector`, `std::deque`, `std::list`, `SimpleGapBuffer`, `SimplePieceTable`, `__gnu_cxx::rope`.
+  * **Benchmark Harness:** `src/benchmark.cpp` compares BiModalText against `std::vector`, `SimpleGapBuffer`, `SimplePieceTable`, `__gnu_cxx::rope` under multiple scenarios (typing insert 10MB, sequential read 100MB, heavy typer 100MB midpoint inserts, backspace 10MB, refactor/random 10MB).
   * **Verification Harness:** `src/fuzzer.cpp`(및 루트 `fuzzer` 실행 파일)은 단위 회귀와 확률적 퍼징을 한 번에 수행한다.
 
-### 4.2 Scenario Analysis
+### 4.2 Scenario Analysis (Updated Overview)
 
-#### A. Basic Performance (Typing & Reading)
+최신 벤치마크는 다음 시나리오에서 실행된다.
 
-  * **Reading:** `BiModal`(0.019ms)은 `std::vector`(0.017ms)와 거의 대등하며, `Rope`(0.393ms)보다 약 **20배 빠르다**. 이는 Iterator 최적화와 Compact Node 변환 전략이 유효했음을 증명한다.
-  * **Typing:** `BiModal`(2.65ms)은 `SimpleGapBuffer`(0.05ms)보다 느리지만, `std::vector`(36.9ms)보다 13배 빠르며 사용자 입력 반응 속도(Latency)로는 충분히 빠르다.
+- **Typing Insert:** 10 MB 텍스트에 1,000회 중앙 삽입 (지역적 편집).
+- **Sequential Read:** 100 MB 텍스트 순차 스캔 (읽기 대역폭).
+- **Heavy Typer:** 100 MB 프리필 후 중앙 부근 5,000회 삽입 (집중 편집).
+- **Backspacer:** 10 MB 텍스트에서 중앙 부근 10,000회 삭제 (지역 삭제).
+- **Refactorer:** 10 MB 텍스트에 대해 균일 랜덤 위치 읽기+삽입 1,000회 (분산 편집).
+- **Random Cursor Insert:** 10 MB 텍스트에 균일 랜덤 삽입 5,000회 (검색/유지 비용).
 
-#### B. Scalability: "The Heavy Typer"
+정량 수치는 워크로드와 하드웨어에 따라 변동하므로 별도 표로 제시하며, 공정성을 위해 데이터 크기, 커서 분포, 프리필/준비 단계(옵티마이즈 여부)를 시나리오별로 명시한다.
 
-2MB 크기의 파일에 5,000번 삽입을 수행했을 때, `std::vector`는 79ms로 급격히 성능이 저하되었으나, `BiModal`은 5.4ms로 `Rope`(5.1ms)와 유사한 **$O(log N)$ 확장성**을 보였다.
+### 4.3 Baselines and Fairness
 
-#### C. Efficiency: "The Backspacer" (Deletion)
-
-가장 인상적인 결과는 삭제 연산에서 나타났다.
-
-  * **BiModal (0.82ms) vs Rope (6.42ms)**
-  * 트리 밸런싱이 필요한 Rope와 달리, 단순히 Gap을 확장하는 '논리적 삭제' 방식을 사용한 BiModal이 **7.8배 더 빠른 성능**을 기록했다.
-
-#### D. The Real World: "Random Cursor Insertion"
-
-실제 편집 환경을 모사한 랜덤 위치 삽입 시나리오에서 Bi-Modal 구조의 진가가 드러났다.
-
-  * `SimpleGapBuffer`: 1.40ms (커서 이동 오버헤드 발생)
-  * `Rope`: 11.41ms (트리 탐색 및 캐시 미스)
-  * **BiModal:** **0.31ms**
-  * 결과적으로 **Gap Buffer 대비 4.5배, Rope 대비 36배**의 압도적인 성능 향상을 보였다. 이는 지역성(Gap Buffer)과 탐색 효율(Skip List)의 장점을 성공적으로 결합했음을 의미한다.
+비교 대상은 `std::vector`, `SimpleGapBuffer`, `NaivePieceTable`, `SGI Rope`(지원 시), `BiModalText`로 통일하였다. Heavy Typer(100 MB) 시나리오에서만 BiModalText가 프리필 후 `optimize()`를 호출하며, 다른 시나리오에서는 프리필만 수행한다. Random Cursor 시나리오에서는 BiModalText의 측정이 `insert+optimize+scan`을 포함하므로 다른 구조와 합산 항목이 다름을 명시한다. 모든 랜덤 시나리오는 고정 시드의 MT 기반 균일 분포를 사용한다.
 
 ### 4.3 Robustness Through Regression & Fuzzing
 

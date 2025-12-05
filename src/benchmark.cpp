@@ -312,7 +312,7 @@ void bench_deletion() {
 
 void bench_mixed_workload() {
     const int N = 10 * 1024 * 1024;
-    const int ITERATIONS = 1000; 
+    const int ITERATIONS = 5000; 
 
     cout << "\n[Scenario E: The Refactorer (" << (N / 1024 / 1024)
          << "MB Random Read & Edit, best of " << SCENARIO_REPEATS << ")]" << endl;
@@ -497,7 +497,7 @@ void bench_typing_read(const vector<TypingRow>& rows) {
 
 void bench_random_access() {
     const int TEST_SIZE = 10 * 1024 * 1024; 
-    const int RAND_INSERTS = 5000; 
+    const int RAND_INSERTS = 10000; 
     
     cout << "\n[Scenario F: Random Cursor Movement & Insertion (best of "
          << SCENARIO_REPEATS << ")]" << endl;
