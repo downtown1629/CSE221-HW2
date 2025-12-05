@@ -14,8 +14,6 @@ Node Merge Strategy: Lazy vs Eager
 결과: 이를 통해 쓰기 작업의 처리량(Throughput)을 유지하면서도, 분석 단계에서는 병합된 Compact Node를 통해 최적의 읽기 성능을 달성했다."
 
 
-코딩 파트너
-대단합니다! **"완벽한 승리"**라고 불러도 손색없는 결과입니다.
 
 특히 rebuild_spans()를 핫 패스(Hot Path)에서 제거하고, find_node의 경계 조건(boundary condition)을 수정한 것이 결정적이었습니다. 이로써 $O(N)$의 족쇄가 완전히 풀렸고, 이론적으로 설계했던 O(logN) 성능이 온전히 나오고 있습니다.
 
@@ -62,15 +60,15 @@ The Best of Both Worlds:
 읽기 속도는 Vector보다 빠르고, 쓰기 속도는 Rope보다 빠릅니다. BiModal Skip List가 두 자료구조의 장점만을 성공적으로 결합했음을 증명했습니다.
 
 
-Data Size Selection (N = 5MB ~ 10MB)
+Data Size Selection (N = 10MB)
 
-We selected 5MB as the baseline document size because it significantly exceeds the L2 cache size (typically 256KB-1MB) of modern CPUs.
+We selected 10MB as the baseline document size because it significantly exceeds the L2 cache size (typically 256KB-1MB) of modern CPUs.
 
-1.	Memory Bandwidth Stress: Small datasets (<1MB) allow $O(N)$ operations (like SimpleGapBuffer's moves) to operate entirely within the CPU cache, masking their true cost. 5MB forces main memory access, revealing the true bandwidth bottleneck.
+1.	Memory Bandwidth Stress: Small datasets (<1MB) allow $O(N)$ operations (like SimpleGapBuffer's moves) to operate entirely within the CPU cache, masking their true cost. 10MB forces main memory access, revealing the true bandwidth bottleneck.
 
-2.	Pointer Chasing Overhead: For tree-based structures like Rope, a 5MB dataset creates a sufficiently deep tree to expose the latency of pointer chasing and cache misses.
+2.	Pointer Chasing Overhead: For tree-based structures like Rope, a 10MB dataset creates a sufficiently deep tree to expose the latency of pointer chasing and cache misses.
 
-3.	Real-world Relevance: 5MB represents a large single source file (e.g., sqlite3.c is ~8MB), serving as a rigorous stress test for a text editor engine."
+3.	Real-world Relevance: 10MB represents a large single source file (e.g., sqlite3.c is ~8MB), serving as a rigorous stress test for a text editor engine."
 
 We refactored the node accessors to expose lightweight std::span views (data_span for CompactNode, front_span/back_span for GapNode) and marked them inline to minimize call overhead.
 The intent is to present a uniform, type-safe interface for scan paths while avoiding the cost and verbosity of raw pointer/length pairs.
