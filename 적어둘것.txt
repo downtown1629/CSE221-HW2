@@ -71,3 +71,7 @@ We selected 5MB as the baseline document size because it significantly exceeds t
 2.	Pointer Chasing Overhead: For tree-based structures like Rope, a 5MB dataset creates a sufficiently deep tree to expose the latency of pointer chasing and cache misses.
 
 3.	Real-world Relevance: 5MB represents a large single source file (e.g., sqlite3.c is ~8MB), serving as a rigorous stress test for a text editor engine."
+
+We refactored the node accessors to expose lightweight std::span views (data_span for CompactNode, front_span/back_span for GapNode) and marked them inline to minimize call overhead.
+The intent is to present a uniform, type-safe interface for scan paths while avoiding the cost and verbosity of raw pointer/length pairs.
+The result is clearer, safer traversal code with minimal additional overhead in tight benchmark scenarios.
