@@ -88,14 +88,14 @@ struct Piece {
     size_t length;
 };
 
-class SimplePieceTable {
+class NaivePieceTable {
     std::string original_buffer; 
     std::string add_buffer;      
     std::list<Piece> pieces;     
     size_t total_length;
 
 public:
-    SimplePieceTable() : total_length(0) {
+    NaivePieceTable() : total_length(0) {
         add_buffer.reserve(1024 * 1024); 
     }
     

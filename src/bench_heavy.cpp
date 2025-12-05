@@ -75,7 +75,7 @@ double bench_gap() {
 
 double bench_piece() {
     return run_best_of([&]() {
-        SimplePieceTable pt;
+        NaivePieceTable pt;
         pt.insert(0, string(LARGE_SIZE, 'x'));
         size_t mid = pt.size() / 2;
         Timer t;

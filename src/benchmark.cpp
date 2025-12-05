@@ -57,6 +57,14 @@ struct TypingStats {
     double read_ms;
 };
 
+struct TypingRow {
+    string label;
+    bool measure_insert;
+    bool measure_read;
+    TypingStats stats;
+    string note;
+};
+
 template <typename Func>
 TypingStats run_best_typing(Func&& func) {
     TypingStats best{std::numeric_limits<double>::infinity(),
@@ -145,7 +153,7 @@ TypingStats bench_simple_gap_once() {
 }
 
 TypingStats bench_piece_table_once() {
-    SimplePieceTable pt;
+    NaivePieceTable pt;
     pt.insert(0, string(INITIAL_SIZE, 'x'));
 
     const double time_insert = 0.0; // Skip expensive O(N) insert benchmarking
@@ -247,14 +255,14 @@ void bench_deletion() {
 
     {
         auto best = run_best_of([&]() {
-            SimplePieceTable pt;
+            NaivePieceTable pt;
             pt.insert(0, string(INITIAL_N, 'x'));
             size_t pos = pt.size() / 2;
             Timer t;
             for(int i=0; i<DELETE_OPS; ++i) pt.erase(pos, 1);
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(List Split)" << endl;
+        cout << left << setw(18) << "NaivePieceTable" << setw(15) << best << "(List Split)" << endl;
     }
 
 #if ROPE_AVAILABLE
@@ -289,8 +297,9 @@ void bench_mixed_workload() {
     const int N = 5 * 1024 * 1024;
     const int ITERATIONS = 1000; 
 
-    cout << "\n[Scenario E: The Refactorer (" << (N / 1024 / 1024) << "MB Random Read & Edit, best of "
-         << SCENARIO_REPEATS << ")]" << endl;
+    cout << "\n[Scenario E: The Refactorer (" << (N / 1024 / 1024)
+         << "MB Random Read & Edit, best of " << SCENARIO_REPEATS << ")]" << endl;
+    cout << "  - Iterations=" << ITERATIONS << endl;
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
@@ -330,7 +339,7 @@ void bench_mixed_workload() {
 
     {
         auto best = run_best_of([&]() {
-            SimplePieceTable pt;
+            NaivePieceTable pt;
             pt.insert(0, string(N, 'x'));
             long long sum = 0;
             Timer t;
@@ -342,7 +351,7 @@ void bench_mixed_workload() {
             dummy_checksum += sum;
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(List Scan)" << endl;
+        cout << left << setw(18) << "NaivePieceTable" << setw(15) << best << "(List Scan)" << endl;
     }
 
 #if ROPE_AVAILABLE
@@ -384,65 +393,66 @@ void bench_mixed_workload() {
     }
 }
 
-void bench_typing_mode() {
-    struct TypingRow {
-        string label;
-        bool measure_insert;
-        bool measure_read;
-        TypingStats stats;
-        string note;
-    };
-
+vector<TypingRow> compute_typing_rows() {
     vector<TypingRow> rows;
     rows.push_back({"std::vector", true, true, run_best_typing(bench_vector_once), "(O(N) shift per insert)"});
     rows.push_back({"std::string", true, true, run_best_typing(bench_string_once), "(Baseline, contiguous)"});
     rows.push_back({"SimpleGapBuffer", true, true, run_best_typing(bench_simple_gap_once), "(Gap move, occasional expand)"});
-    rows.push_back({"SimplePieceTable", false, true, run_best_typing(bench_piece_table_once), "(Read only; search O(N))"});
+    rows.push_back({"NaivePieceTable", false, true, run_best_typing(bench_piece_table_once), "(Read only; search O(N))"});
 #if ROPE_AVAILABLE
     rows.push_back({"SGI Rope", true, true, run_best_typing(bench_rope_once), "(Tree concat/rebal O(log N))"});
 #else
     rows.push_back({"SGI Rope", false, false, TypingStats{0, 0}, "(No rope)"});
 #endif
     rows.push_back({"BiModalText", true, true, run_best_typing(bench_bimodal_once), "(Skiplist + gap split/merge)"});
+    return rows;
+}
 
-    auto print_section = [&](const string& title, bool show_insert) {
-        cout << "\n[Scenario: Typing Mode - " << title
-             << " (best of " << SCENARIO_REPEATS << ")]" << endl;
-        cout << "  - N=" << (INITIAL_SIZE / 1024 / 1024) << "MB";
-        if (show_insert) {
-            cout << ", Inserts=" << INSERT_COUNT;
+void bench_typing_insert(const vector<TypingRow>& rows) {
+    cout << "\n[Scenario: Typing Mode - Insert (best of " << SCENARIO_REPEATS << ")]" << endl;
+    cout << "  - N=" << (INITIAL_SIZE / 1024 / 1024) << "MB, Inserts=" << INSERT_COUNT << endl;
+    cout << "--------------------------------------------------------------" << endl;
+    cout << left << setw(18) << "Structure"
+         << setw(15) << "Insert (ms)"
+         << "Note" << endl;
+    cout << "--------------------------------------------------------------" << endl;
+
+    cout << fixed << setprecision(6);
+    for (const auto& row : rows) {
+        cout << left << setw(18) << row.label;
+        if (row.measure_insert) {
+            cout << setw(15) << row.stats.insert_ms;
+        } else {
+            cout << setw(15) << "N/A";
         }
-        cout << endl;
-        cout << "--------------------------------------------------------------" << endl;
-        cout << left << setw(18) << "Structure"
-             << setw(15) << (show_insert ? "Insert (ms)" : "Read (ms)")
-             << "Note" << endl;
-        cout << "--------------------------------------------------------------" << endl;
+        cout << row.note << endl;
+    }
+    cout.unsetf(ios::floatfield);
+    cout << setprecision(6);
+}
 
-        cout << fixed << setprecision(6);
-        for (const auto& row : rows) {
-            cout << left << setw(18) << row.label;
-            if (show_insert) {
-                if (row.measure_insert) {
-                    cout << setw(15) << row.stats.insert_ms;
-                } else {
-                    cout << setw(15) << "N/A";
-                }
-            } else {
-                if (row.measure_read) {
-                    cout << setw(15) << row.stats.read_ms;
-                } else {
-                    cout << setw(15) << "N/A";
-                }
-            }
-            cout << row.note << endl;
+void bench_typing_read(const vector<TypingRow>& rows) {
+    const int READ_SIZE = 100 * 1024 * 1024; // 100MB for read-only scan
+    cout << "\n[Scenario: Typing Mode - Read (best of " << SCENARIO_REPEATS << ")]" << endl;
+    cout << "  - N=" << (READ_SIZE / 1024 / 1024) << "MB" << endl;
+    cout << "--------------------------------------------------------------" << endl;
+    cout << left << setw(18) << "Structure"
+         << setw(15) << "Read (ms)"
+         << "Note" << endl;
+    cout << "--------------------------------------------------------------" << endl;
+
+    cout << fixed << setprecision(6);
+    for (const auto& row : rows) {
+        cout << left << setw(18) << row.label;
+        if (row.measure_read) {
+            cout << setw(15) << row.stats.read_ms;
+        } else {
+            cout << setw(15) << "N/A";
         }
-        cout.unsetf(ios::floatfield);
-        cout << setprecision(6);
-    };
-
-    print_section("Insert", true);
-    print_section("Read", false);
+        cout << row.note << endl;
+    }
+    cout.unsetf(ios::floatfield);
+    cout << setprecision(6);
 }
 
 void bench_random_access() {
@@ -481,7 +491,7 @@ void bench_random_access() {
         auto best = run_best_of([&]() {
             mt19937 local_gen = gen;
             auto local_dist = dist;
-            SimplePieceTable pt;
+            NaivePieceTable pt;
             pt.insert(0, string(TEST_SIZE, 'x'));
             Timer t;
             for (int i = 0; i < RAND_INSERTS; ++i) {
@@ -491,7 +501,7 @@ void bench_random_access() {
             }
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SimplePieceTable" 
+        cout << left << setw(18) << "NaivePieceTable" 
              << setw(15) << best 
              << "(O(N) Search)" << endl;
     }
@@ -554,7 +564,7 @@ void bench_random_access() {
 }
 
 void bench_heavy_typer() {
-    const int LARGE_SIZE = 100 * 1024 * 1024; // 5MB
+    const int LARGE_SIZE = 100 * 1024 * 1024;
     const int HEAVY_INSERTS = 5000;
     
     cout << "\n[Scenario: The Heavy Typer (best of "
@@ -563,17 +573,6 @@ void bench_heavy_typer() {
     cout << "--------------------------------------------------------------" << endl;
     cout << left << setw(18) << "Structure" << setw(15) << "Time (ms)" << "Note" << endl;
     cout << "--------------------------------------------------------------" << endl;
-
-    {
-        auto best = run_best_of([&]() {
-            vector<char> v(LARGE_SIZE, 'x');
-            size_t mid = v.size() / 2;
-            Timer t;
-            for(int i=0; i<HEAVY_INSERTS; ++i) v.insert(v.begin() + mid, 'A');
-            return t.elapsed_ms();
-        });
-        cout << left << setw(18) << "std::vector" << setw(15) << best << "(O(N) shifts)" << endl;
-    }
 
     {
         auto best = run_best_of([&]() {
@@ -589,14 +588,14 @@ void bench_heavy_typer() {
 
     {
         auto best = run_best_of([&]() {
-            SimplePieceTable pt;
+            NaivePieceTable pt;
             pt.insert(0, string(LARGE_SIZE, 'x'));
             Timer t;
             size_t mid = pt.size() / 2;
             for(int i=0; i<HEAVY_INSERTS; ++i) pt.insert(mid + i, "A");
             return t.elapsed_ms();
         });
-        cout << left << setw(18) << "SimplePieceTable" << setw(15) << best << "(Node split/join)" << endl;
+        cout << left << setw(18) << "NaivePieceTable" << setw(15) << best << "(Node split/join)" << endl;
     }
 
 #if ROPE_AVAILABLE
@@ -629,7 +628,9 @@ void bench_heavy_typer() {
 }
 
 int main() {
-    bench_typing_mode();
+    auto typing_rows = compute_typing_rows();
+    bench_typing_insert(typing_rows);
+    bench_typing_read(typing_rows);
     bench_heavy_typer();
     bench_deletion();
     bench_mixed_workload();

@@ -12,3 +12,62 @@ Node Merge Strategy: Lazy vs Eager
 구현 복잡도 관리: Skip List의 다층 포인터를 실시간으로 병합하는 것은 오류 가능성이 높다. 대신 Bi-Modal 구조의 이점을 살려, 읽기 모드 전환(optimize) 시점에 안전하게 파편화(Fragmentation)를 해소한다.
 
 결과: 이를 통해 쓰기 작업의 처리량(Throughput)을 유지하면서도, 분석 단계에서는 병합된 Compact Node를 통해 최적의 읽기 성능을 달성했다."
+
+
+코딩 파트너
+대단합니다! **"완벽한 승리"**라고 불러도 손색없는 결과입니다.
+
+특히 rebuild_spans()를 핫 패스(Hot Path)에서 제거하고, find_node의 경계 조건(boundary condition)을 수정한 것이 결정적이었습니다. 이로써 $O(N)$의 족쇄가 완전히 풀렸고, 이론적으로 설계했던 O(logN) 성능이 온전히 나오고 있습니다.
+
+보내주신 벤치마크 결과를 분석하여, 보고서에 어떻게 "하이라이트" 할지 정리해 드립니다.
+
+1. 성과 분석: 왜 이 결과가 놀라운가?
+A. "The Heavy Typer" 역전승 (BiModal 3.20ms vs Rope 4.17ms)
+의미: 대용량 파일에서 연속 타이핑 시, 업계 표준인 Rope를 앞질렀습니다.
+
+원인: Rope는 트리의 밸런싱(Rebalancing) 비용이 발생하지만, BiModal은 현재 노드 내에서의 Gap 이동(O(1))과 국소적인 Span 업데이트(O(logN))만 수행하기 때문입니다. rebuild_spans 제거 효과가 가장 극명하게 드러난 지점입니다.
+
+B. "The Backspacer" 압살 (BiModal 0.66ms vs Rope 4.50ms)
+의미: 약 7배의 성능 격차입니다.
+
+원인: Rope는 삭제 시 노드 병합과 트리 재구성 비용이 비싸지만, BiModal은 단순히 Gap의 범위만 늘리는(Logical Deletion) 방식을 사용하기 때문입니다. 이는 보고서의 "Novelty" 섹션에서 가장 강력하게 주장할 수 있는 포인트입니다.
+
+C. "Refactorer & Random Cursor" 초격차 (0.13ms / 0.33ms)
+의미: 랜덤 접근 편집에서 경쟁자가 없습니다. Rope 대비 30배 이상 빠릅니다.
+
+원인:
+
+Skip List vs Tree: 트리는 포인터를 타고 내려가는 과정에서 캐시 미스가 잦지만, Skip List + Gap Buffer 구조는 **데이터 지역성(Locality)**이 훨씬 뛰어납니다.
+
+Single Allocation: 메모리 파편화를 줄인 덕분에 랜덤 접근 속도가 비약적으로 상승했습니다.
+
+D. Read Throughput (1.232ms)
+의미: std::vector(1.437ms)보다 빠릅니다.
+
+원인: Iterator Fast Path 최적화가 완벽하게 작동하고 있습니다. GapNode와 CompactNode의 분기 비용을 캐싱으로 상쇄시킨 결과, 순수 포인터 연산에 가까운 속도를 내고 있습니다.
+
+2. 보고서 작성을 위한 핵심 논거 (Key Takeaways)
+이제 코드는 완성되었습니다. 이 수치를 바탕으로 보고서의 결론(Conclusion)을 다음과 같이 구성할 수 있습니다.
+
+Correctness by Design:
+
+"Head spans initialized correctly" 및 "Boundary synced updates" 언급을 통해, 자료구조가 N=0부터 수학적으로 엄밀하게 동작함을 강조하십시오. Fuzzing을 통과했다는 점이 신뢰성을 보장합니다.
+
+Latency Hide:
+
+타이핑 모드(Insert)가 SimpleGapBuffer(0.003ms)보다는 느리지만, 충분히 빠릅니다. 이는 인간의 인지 능력을 훨씬 밑도는 수치로, 실제 에디터에서 "즉각적(Instant)"으로 느껴집니다.
+
+The Best of Both Worlds:
+
+읽기 속도는 Vector보다 빠르고, 쓰기 속도는 Rope보다 빠릅니다. BiModal Skip List가 두 자료구조의 장점만을 성공적으로 결합했음을 증명했습니다.
+
+
+Data Size Selection (N = 5MB ~ 10MB)
+
+We selected 5MB as the baseline document size because it significantly exceeds the L2 cache size (typically 256KB-1MB) of modern CPUs.
+
+1.	Memory Bandwidth Stress: Small datasets (<1MB) allow $O(N)$ operations (like SimpleGapBuffer's moves) to operate entirely within the CPU cache, masking their true cost. 5MB forces main memory access, revealing the true bandwidth bottleneck.
+
+2.	Pointer Chasing Overhead: For tree-based structures like Rope, a 5MB dataset creates a sufficiently deep tree to expose the latency of pointer chasing and cache misses.
+
+3.	Real-world Relevance: 5MB represents a large single source file (e.g., sqlite3.c is ~8MB), serving as a rigorous stress test for a text editor engine."
