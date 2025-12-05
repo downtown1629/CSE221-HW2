@@ -30,17 +30,18 @@ using namespace std::chrono;
 //  Utility: Timer
 // =========================================================
 class Timer {
-    high_resolution_clock::time_point start;
+    using clock = std::chrono::steady_clock;
+    clock::time_point start;
 public:
     Timer() { reset(); }
-    void reset() { start = high_resolution_clock::now(); }
+    void reset() { start = clock::now(); }
     double elapsed_ms() {
-        auto end = high_resolution_clock::now();
+        auto end = clock::now();
         return duration_cast<duration<double, milli>>(end - start).count();
     }
 };
 
-constexpr int SCENARIO_REPEATS = 8;
+constexpr int SCENARIO_REPEATS = 10;
 
 template <typename Func>
 double run_best_of(Func&& func) {
@@ -71,8 +72,8 @@ TypingStats run_best_typing(Func&& func) {
 // =========================================================
 //  Test Parameters
 // =========================================================
-const int INITIAL_SIZE = 8000000;
-const int INSERT_COUNT = 5000;
+const int INITIAL_SIZE = 20000000;
+const int INSERT_COUNT = 2000;
 long long dummy_checksum = 0;
 
 // =========================================================
@@ -620,7 +621,7 @@ struct TypingRow {
 #endif
     rows.push_back({"BiModalText", true, true, run_best_typing(bench_bimodal_once), "(Target)"});
 
-    cout << fixed << setprecision(3);
+    cout << fixed << setprecision(6);
     for (const auto& row : rows) {
         cout << left << setw(18) << row.label;
         if (row.measure_insert) {

@@ -129,23 +129,28 @@ struct GapNode {
 
     // 버퍼 확장
     void expand_buffer(size_t needed) {
-        size_t old_cap = buf.size();
-        // 최소 2배 혹은 필요한 만큼 + 여유분
-        size_t new_cap = std::max(old_cap * 2, old_cap + needed + DEFAULT_GAP_SIZE);
-        size_t back_part_size = old_cap - gap_end;
-        
-        std::vector<char> new_buf(new_cap); // 0으로 초기화됨 (낭비)
+        const size_t old_cap = buf.size();
+        const size_t used_front = gap_start;
+        const size_t used_back = old_cap - gap_end;
+        const size_t used_bytes = used_front + used_back;
 
-        // Gap 앞부분 복사
-        std::copy(buf.begin(), buf.begin() + gap_start, new_buf.begin());
-        
-        // Gap 뒷부분 복사 (새 버퍼의 끝쪽에 배치)
-        if (back_part_size > 0) {
-            std::copy(buf.begin() + gap_end, buf.end(), new_buf.end() - back_part_size);
+        // 여유 공간을 크게 확보하여 연속적인 확장을 줄인다.
+        const size_t new_cap = std::max(old_cap * 2, used_bytes + needed + DEFAULT_GAP_SIZE);
+        std::vector<char> new_buf(new_cap);
+
+        // 앞부분 데이터 복사
+        std::copy(buf.begin(), buf.begin() + used_front, new_buf.begin());
+
+        // 뒷부분 데이터는 새 버퍼의 끝부분에 배치한다.
+        if (used_back > 0) {
+            std::copy(buf.begin() + gap_end,
+                      buf.end(),
+                      new_buf.begin() + used_front + (new_cap - used_bytes));
         }
-        
+
         buf = std::move(new_buf);
-        gap_end = new_cap - back_part_size; 
+        gap_start = used_front;
+        gap_end = gap_start + (new_cap - used_bytes);
     }
 
     // [최적화] 노드 분할을 위한 Suffix 추출 (string 변환 제거)

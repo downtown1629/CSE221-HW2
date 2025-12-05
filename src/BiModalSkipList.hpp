@@ -38,7 +38,7 @@ public:
 
     #ifdef BIMODAL_DEBUG
     // span, total_size, at()/to_string() 일관성 검사
-    void debug_verify_spans(std::ostream& os = std::cerr) const;
+    bool debug_verify_spans(std::ostream& os = std::cerr) const;
 
     // 레벨 0 기준 노드 구조 덤프
     void debug_dump_structure(std::ostream& os = std::cerr) const;
@@ -137,6 +137,7 @@ public:
     void scan(Func func) const {
         Node* curr = head->next[0];
         while (curr) {
+            assert(!curr->data.valueless_by_exception());
             // std::visit 오버헤드를 노드당 1회로 줄임
             std::visit([&](auto const& n) {
                 using T = std::decay_t<decltype(n)>;
@@ -179,13 +180,18 @@ public:
                 target = create_node(random_level());
                 std::get<GapNode>(target->data).insert(0, s); // GapNode임을 확신하므로 바로 접근
                 
-                for (int i = 0; i < target->level; ++i) {
-                    // Node 생성자에서 next는 nullptr로 초기화되므로 굳이 target->next[i] = nullptr 안 해도 됨
-                    head->next[i] = target;
-                    head->span[i] = target->content_size(); 
+                for (int i = 0; i < MAX_LEVEL; ++i) {
+                    if (i < target->level) {
+                        head->next[i] = target;
+                    } else {
+                        head->next[i] = nullptr;
+                    }
+                    head->span[i] = target->content_size();
                 }
                 total_size += s.size();
-                rebuild_spans();
+#ifdef BIMODAL_DEBUG
+                debug_verify_spans();
+#endif
                 return; // 여기서 함수 종료!
             } else {
                  throw std::runtime_error("Unexpected null target on non-empty list");
@@ -212,7 +218,9 @@ public:
         }
         
         total_size += s.size(); // *주의: Early return 했으므로 여기 도달하는 건 일반 케이스뿐임
-        rebuild_spans();
+#ifdef BIMODAL_DEBUG
+        debug_verify_spans();
+#endif
     }
 
     char at(size_t pos) const {
@@ -260,6 +268,7 @@ public:
         res.reserve(total_size);
         Node* curr = head->next[0]; // Level 0 순회
         while (curr) {
+            assert(!curr->data.valueless_by_exception());
             std::visit([&](auto const& n) {
                 // 노드 타입에 따라 최적화된 블록 복사 수행
                 using T = std::decay_t<decltype(n)>;
@@ -294,49 +303,6 @@ public:
             curr = curr->next[0];
         }
 
-        // [Phase 2] Defragmentation: 인접한 작은 노드들을 하나로 병합
-        // - 노드 수를 줄여 Skip List 탐색(Jump) 효율을 높입니다.
-        curr = head->next[0];
-        while (curr && curr->next[0]) {
-            Node* next_node = curr->next[0];
-            
-            // 병합 조건 검사
-            // 1. 크기 제한: 두 노드를 합쳐도 NODE_MAX_SIZE를 넘지 않는가?
-            // 2. [중요] 최적화: 다음 노드가 Level 1(바닥 레벨)인가?
-            //    - Level 1 노드는 상위 레벨 포인터 수정 없이 O(1)로 제거 가능합니다.
-            size_t combined_size = curr->content_size() + next_node->content_size();
-            
-            if (combined_size <= NODE_MAX_SIZE && next_node->level == 1) {
-                // --- 병합 로직 시작 (Inlined) ---
-                
-                // 1. 데이터 병합 (CompactNode끼리의 결합)
-                auto& curr_buf = std::get<CompactNode>(curr->data).buf;
-                auto& next_buf = std::get<CompactNode>(next_node->data).buf;
-                
-                // 다음 노드의 데이터를 현재 노드 뒤에 복사
-                curr_buf.insert(curr_buf.end(), next_buf.begin(), next_buf.end());
-
-                // 2. 링크(Next Pointer) 수정
-                // next_node를 건너뛰고 그 다음 노드를 가리킴
-                curr->next[0] = next_node->next[0];
-
-                // 3. Span 업데이트
-                // 현재 노드의 span에 사라지는 노드의 span(크기)을 더함
-                curr->span[0] = next_node->span[0];
-
-                // 4. 메모리 해제
-                destroy_node(next_node);
-                
-                // --- 병합 로직 끝 ---
-
-                // 주의: 병합이 일어났을 경우 curr를 이동시키지 않음
-                // 합쳐진 현재 노드가 새로운 다음 노드와 또 합쳐질 수 있기 때문입니다.
-            } else {
-                // 병합하지 않았다면 다음 노드로 이동
-                curr = next_node;
-            }
-        }
-        rebuild_spans();
     }
     
     size_t size() const { return total_size; }
@@ -398,8 +364,9 @@ public:
                 remove_node(target, update);
             }
         }
-        
-        rebuild_spans();
+#ifdef BIMODAL_DEBUG
+        debug_verify_spans();
+#endif
     }
 
 private:
@@ -450,12 +417,18 @@ private:
         while (base) {
             for (int lvl = 1; lvl < base->level; ++lvl) {
                 Node* target = base->next[lvl];
+                size_t distance = 0;
+
                 if (!target) {
-                    base->span[lvl] = 0;
+                    Node* walker = base->next[0];
+                    while (walker) {
+                        distance += walker->content_size();
+                        walker = walker->next[0];
+                    }
+                    base->span[lvl] = distance;
                     continue;
                 }
 
-                size_t distance = 0;
                 Node* walker = base->next[0];
                 while (walker && walker != target) {
                     distance += walker->content_size();
@@ -463,7 +436,14 @@ private:
                 }
 
                 if (!walker) {
-                    base->span[lvl] = 0;
+                    // target vanished? fall back to tail distance
+                    walker = base->next[0];
+                    distance = 0;
+                    while (walker) {
+                        distance += walker->content_size();
+                        walker = walker->next[0];
+                    }
+                    base->span[lvl] = distance;
                 } else {
                     distance += walker->content_size();
                     base->span[lvl] = distance;
@@ -505,13 +485,12 @@ private:
                 if (!target->next[0]) break; 
                 
                 accumulated += target->content_size();
-                
-                // --- [ASan Memory Leak Fix] ---
-                // 노드를 건너뛸 때 update 배열(선행 노드)도 갱신해야 split_node에서 링크가 끊어지지 않음
-                update[0] = target;
-                rank[0] = accumulated; 
-                // ------------------------------
 
+                for (int lvl = 0; lvl < target->level; ++lvl) {
+                    update[lvl] = target;
+                    rank[lvl] = accumulated;
+                }
+                
                 target = target->next[0];
                 node_offset = pos - accumulated;
             }
@@ -519,7 +498,6 @@ private:
         return target;
     }
   
-
     
     void split_node(Node* u, std::array<Node*, MAX_LEVEL>& update) {
         auto& u_gap = std::get<GapNode>(u->data);
@@ -663,12 +641,21 @@ private:
     void remove_node(Node* target, const std::array<Node*, MAX_LEVEL>& update) {
         if (!target) return;  // ✅ null 안전
 
-        for (int i = 0; i < target->level; ++i) {
-            // update[i]는 target의 선행 노드입니다.
-            // target이 존재하는 레벨에서만 링크를 갱신하면 됩니다.
-            if (update[i] && update[i]->next[i] == target) {
-                update[i]->next[i] = target->next[i];
-                update[i]->span[i] = target->span[i];
+        size_t removed_len = target->content_size();
+        for (int i = 0; i < MAX_LEVEL; ++i) {
+            Node* prev = update[i];
+            if (!prev || !prev->next[i]) continue;
+            if (i < target->level && prev->next[i] == target) {
+#ifdef BIMODAL_DEBUG
+                assert(prev->span[i] >= removed_len);
+#endif
+                prev->span[i] = prev->span[i] - removed_len + target->span[i];
+                prev->next[i] = target->next[i];
+            } else {
+#ifdef BIMODAL_DEBUG
+                assert(prev->span[i] >= removed_len);
+#endif
+                prev->span[i] -= removed_len;
             }
         }
         destroy_node(target);
@@ -678,8 +665,8 @@ private:
 };
 
 #ifdef BIMODAL_DEBUG
-void BiModalText::debug_verify_spans(std::ostream& os) const {
-    
+bool BiModalText::debug_verify_spans(std::ostream& os) const {
+    bool ok = true;
     // 1) level 0에서 content_size 합 == total_size?
     size_t sum0 = 0;
     const Node* curr = head->next[0];
@@ -689,6 +676,7 @@ void BiModalText::debug_verify_spans(std::ostream& os) const {
     }
     if (sum0 != total_size) {
         os << "[DEBUG FAIL] L0 sum0=" << sum0 << " != total=" << total_size << "\n";
+        ok = false;
     }
 
     // 2) 각 레벨 span 합 == total_size?
@@ -696,12 +684,14 @@ void BiModalText::debug_verify_spans(std::ostream& os) const {
         if (!head->next[lvl]) continue;  // ✅ 고레벨 구조 없음 → skip
         size_t acc = 0;
         const Node* x = head;
-        while (x->next[lvl]) {
+        while (x) {
             acc += x->span[lvl];
+            if (!x->next[lvl]) break;
             x = x->next[lvl];
         }
         if (acc != total_size) {
             os << "[DEBUG FAIL] L" << lvl << " span_sum=" << acc << " != total=" << total_size << "\n";
+            ok = false;
         }
     }
 
@@ -709,15 +699,54 @@ void BiModalText::debug_verify_spans(std::ostream& os) const {
     std::string full_str = to_string();
     if (full_str.size() != total_size) {
         os << "[DEBUG FAIL] to_string.size()=" << full_str.size() << " != total=" << total_size << "\n";
+        ok = false;
     }
     const size_t N_CHECK = std::min<size_t>(total_size, 5000);
     for (size_t p = 0; p < N_CHECK; ++p) {
         if (at(p) != full_str[p]) {
             os << "[DEBUG FAIL] at(" << p << ")='" << at(p) << "' != to_str='" << full_str[p] << "'\n";
+            ok = false;
             break;
         }
     }
-    os << "[DEBUG OK] spans verified\n";
+
+    // 4) 각 레벨 개별 span이 실제 거리와 일치하는지 검증
+    const Node* base = head;
+    while (base) {
+        for (int lvl = 0; lvl < base->level; ++lvl) {
+            const Node* target = base->next[lvl];
+            size_t distance = 0;
+            const Node* walker = base->next[0];
+
+            if (!target) {
+                while (walker) {
+                    distance += walker->content_size();
+                    walker = walker->next[0];
+                }
+            } else {
+                while (walker && walker != target) {
+                    distance += walker->content_size();
+                    walker = walker->next[0];
+                }
+                if (!walker) {
+                    os << "[DEBUG FAIL] span path missing at lvl=" << lvl << "\n";
+                    ok = false;
+                    break;
+                }
+                distance += walker->content_size();
+            }
+
+            if (distance != base->span[lvl]) {
+                os << "[DEBUG FAIL] node span mismatch lvl=" << lvl
+                   << " distance=" << distance
+                   << " stored=" << base->span[lvl]
+                   << "\n";
+                ok = false;
+            }
+        }
+        base = base->next[0];
+    }
+    return ok;
 }
 
 void BiModalText::debug_dump_structure(std::ostream& os) const {
