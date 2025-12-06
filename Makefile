@@ -25,7 +25,7 @@ $(FUZZER): $(FUZZ_SRC)
 	$(CXX) $(FUZZER_FLAGS) -o $@ $<
 
 $(LIBROPE_O): $(LIBROPE_C) librope/rope.h
-	$(CC) -std=c99 -O3 -march=native -Wall -Wextra -c $< -o $@
+	$(CC) -std=c99 -O3 -march=native -c $< -o $@
 
 run: $(TARGET)
 	./$(TARGET)

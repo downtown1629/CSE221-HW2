@@ -166,7 +166,10 @@ static uint8_t random_height() {
 
   // The root node's height is the height of the largest node + 1, so the largest
   // node can only have ROPE_MAX_HEIGHT - 1.
-  while(height < (ROPE_MAX_HEIGHT - 1) && (random() % 100) < ROPE_BIAS) {
+
+  // compiler doesn't like random(), it says implicit declaration.
+  // replaced with rand()
+  while(height < (ROPE_MAX_HEIGHT - 1) && (rand() % 100) < ROPE_BIAS) {
     height++;
   }
 
