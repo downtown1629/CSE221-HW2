@@ -1,36 +1,65 @@
+# Compiler flags
 MAIN_FLAGS   = -std=c++20 -O3 -march=native -Wall -Wextra -Isrc
 FUZZER_FLAGS = -std=c++20 -Og -march=native -g -fsanitize=address -Wall -Wextra -Isrc -DBIMODAL_DEBUG=ON
+CC_FLAGS     = -std=c99 -O3 -march=native
 
+# Source and target files
 SRC_DIR   = src
 MAIN_SRC  = $(SRC_DIR)/benchmark.cpp
 FUZZ_SRC  = $(SRC_DIR)/fuzzer.cpp
 LIBROPE_C = librope/rope.c
-LIBROPE_WRAPPER = $(SRC_DIR)/librope_wrapper.cpp
 
-TARGET = main
-FUZZER = fuzzer
-LIBROPE_O = librope/rope.o
+TARGET_MAIN   = main
+TARGET_FUZZER = fuzzer
+LIBROPE_O     = librope/rope.o
 
-.PHONY: all run clean debug librope
+# Default to including librope
+USE_LIBROPE ?= yes
 
-all: $(TARGET) $(FUZZER)
+# Conditionally set flags and dependencies for the main benchmark
+ifeq ($(USE_LIBROPE), yes)
+    MAIN_DEPS       = $(LIBROPE_O)
+    MAIN_LINK_FLAGS = -DLIBROPE=ON
+else
+    MAIN_DEPS       =
+    MAIN_LINK_FLAGS =
+endif
 
-$(TARGET): $(MAIN_SRC) $(LIBROPE_O)
-	$(CXX) $(MAIN_FLAGS) -DLIBROPE=ON $(LIBROPE_O) -o $@ $<
+.PHONY: all nolibrope run clean debug
 
-librope: $(MAIN_SRC) $(LIBROPE_O)
-	$(CXX) $(MAIN_FLAGS) -DLIBROPE=ON $(LIBROPE_O) -o $(TARGET) $<
+# Default target: build main (with librope) and fuzzer
+all: $(TARGET_MAIN) $(TARGET_FUZZER)
 
-$(FUZZER): $(FUZZ_SRC)
+# Target to build without librope support
+# Re-invokes make with USE_LIBROPE=no
+nolibrope:
+	@$(MAKE) all USE_LIBROPE=no
+
+# Rule to build the main benchmark executable.
+# Dependencies and flags change based on USE_LIBROPE.
+$(TARGET_MAIN): $(MAIN_SRC) $(MAIN_DEPS)
+	@echo "Compiling benchmark '$@'..."
+	$(CXX) $(MAIN_FLAGS) $(MAIN_LINK_FLAGS) -o $@ $(MAIN_SRC) $(MAIN_DEPS)
+
+# Rule to build the fuzzer executable
+$(TARGET_FUZZER): $(FUZZ_SRC)
+	@echo "Compiling fuzzer '$@'..."
 	$(CXX) $(FUZZER_FLAGS) -o $@ $<
 
+# Rule to build the librope object file
 $(LIBROPE_O): $(LIBROPE_C) librope/rope.h
-	$(CC) -std=c99 -O3 -march=native -c $< -o $@
+	@echo "Compiling C object '$@'..."
+	$(CC) $(CC_FLAGS) -c $< -o $@
 
-run: $(TARGET)
-	./$(TARGET)
+# Rule to run the benchmark
+run: $(TARGET_MAIN)
+	./$(TARGET_MAIN)
 
+# Rule to run the fuzzer in debug mode
+debug: $(TARGET_FUZZER)
+	./$(TARGET_FUZZER)
+
+# Rule to clean up generated files
 clean:
-	rm -f $(TARGET) $(FUZZER) $(LIBROPE_O)
-
-debug: $(FUZZER)
+	@echo "Cleaning up..."
+	rm -f $(TARGET_MAIN) $(TARGET_FUZZER) $(LIBROPE_O)
