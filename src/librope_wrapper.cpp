@@ -8,20 +8,20 @@ extern "C" {
 
 // Minimal C++ wrapper around librope for benchmarking.
 // Provides insert, erase, size, and scan operations.
-class LibroPe {
+class LibRope {
 public:
-    LibroPe() : r(rope_new()) {}
-    ~LibroPe() {
+    LibRope() : r(rope_new()) {}
+    ~LibRope() {
         if (r) rope_free(r);
     }
 
     // Non-copyable
-    LibroPe(const LibroPe&) = delete;
-    LibroPe& operator=(const LibroPe&) = delete;
+    LibRope(const LibRope&) = delete;
+    LibRope& operator=(const LibRope&) = delete;
 
     // Move
-    LibroPe(LibroPe&& other) noexcept : r(other.r) { other.r = nullptr; }
-    LibroPe& operator=(LibroPe&& other) noexcept {
+    LibRope(LibRope&& other) noexcept : r(other.r) { other.r = nullptr; }
+    LibRope& operator=(LibRope&& other) noexcept {
         if (this != &other) {
             if (r) rope_free(r);
             r = other.r;

@@ -9,7 +9,7 @@
 #include <cstring>
 #include <span>
 
-constexpr size_t DEFAULT_GAP_SIZE = 128;   // 필요시 값 조정 (기존 값 사용)
+constexpr size_t DEFAULT_GAP_SIZE = 1024;   // 필요시 값 조정 (기존 값 사용)
 constexpr size_t NODE_MAX_SIZE = 4096;  // 노드 최대 크기
 constexpr size_t NODE_MIN_SIZE = 256;   // 병합 기준 등으로 쓰면 여기
 
@@ -218,9 +218,10 @@ struct GapNode {
 using NodeData = std::variant<GapNode, CompactNode>;
 
 
-GapNode expand(const CompactNode& c) {
-    // 기존 데이터 크기 + 여유 공간(Gap) 만큼 할당
-    GapNode g(c.buf.size() + DEFAULT_GAP_SIZE);
+GapNode expand(const CompactNode& c, bool for_deletion = false) {
+    // deletion 시에는 작은 gap, insertion 시에는 넉넉한 gap
+    const size_t gap_pad = for_deletion ? 8 : DEFAULT_GAP_SIZE;
+    GapNode g(c.buf.size() + gap_pad);
     
     // 데이터 복사: CompactNode의 모든 데이터를 GapNode의 앞부분으로 복사
     std::copy(c.buf.begin(), c.buf.end(), g.buf.begin());

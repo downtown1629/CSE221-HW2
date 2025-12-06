@@ -64,7 +64,7 @@ Iterator는 노드 타입별 포인터와 길이를 캐싱하여 `std::visit` �
 - `simple_sanity_tests`, `split_merge_stress_test`, `random_edit_test`: BiModalText를 `std::string` 참조 모델과 비교하며 삽입·삭제·최적화 연산을 검증한다.
 - `Fuzzer`: 균형 잡힌 삽입/삭제/최적화/읽기 요청을 수천 번 던져, `InvariantChecker`로 `size()`, `iterator`, `to_string()` 일관성을 보장한다.
 
-`src/main.cpp`는 최종 데모로, Insert/Optimize/Re-edit 흐름을 한 번에 보여주며 보고서에 담은 개념적 흐름과 동일하게 동작한다. 루트 디렉터리의 `fuzzer` 실행 파일을 통해 위 회귀 도구를 반복 실행할 수 있다.
+
 
 ## 3. Related Work and Comparison
 
@@ -110,7 +110,7 @@ Iterator는 노드 타입별 포인터와 길이를 캐싱하여 `std::visit` �
 
 ### 4.3 Robustness Through Regression & Fuzzing
 
-Gemini 초안의 모든 수치는 대규모 퍼징과 함께 보고된다. `run_regression_suite()`는 삽입/삭제/옵티마이즈 승인 시나리오를 결정론적으로 재생한 뒤, 서로 다른 시드(1,2,3)에 대해 2,000회 랜덤 편집을 수행한다. 이어지는 `Fuzzer` 클래스는 100회마다 상태를 검증하고, 실패 시 최근 10개 연산 로그와 Skip List 구조를 덤프해 재현성을 보장한다. 이 과정에서 `rebuild_spans()` 수정을 거친 이후로는 `iterator`, `at()`, `to_string()` 사이의 어긋남이 보고되지 않았다.
+보고서 초안의 모든 수치는 대규모 퍼징과 함께 보고된다. `run_regression_suite()`는 삽입/삭제/옵티마이즈 승인 시나리오를 결정론적으로 재생한 뒤, 서로 다른 시드(1,2,3)에 대해 2,000회 랜덤 편집을 수행한다. 이어지는 `Fuzzer` 클래스는 100회마다 상태를 검증하고, 실패 시 최근 10개 연산 로그와 Skip List 구조를 덤프해 재현성을 보장한다. 이 과정에서 `rebuild_spans()` 수정을 거친 이후로는 `iterator`, `at()`, `to_string()` 사이의 어긋남이 보고되지 않았다.
 
 ## 5. Limitations and Future Work
 

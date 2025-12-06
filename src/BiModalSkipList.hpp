@@ -4,6 +4,7 @@
 #include <random>
 #include <cassert>
 #include <memory_resource>
+#include <stdexcept>
 #include "Nodes.hpp"
 
 // 스킵 리스트용 상수들
