@@ -195,7 +195,7 @@ public:
         // --- 이하 일반 케이스 (else 블록 제거로 들여쓰기 감소) ---
 
         if (std::holds_alternative<CompactNode>(target->data)) {
-            target->data = expand(std::get<CompactNode>(target->data));
+            target->data = expand(std::get<CompactNode>(target->data), false);
         }
         
         // ... (나머지 로직 그대로)
@@ -340,7 +340,7 @@ public:
             size_t del_len = std::min(len, available);
 
             if (std::holds_alternative<CompactNode>(target->data)) {
-                target->data = expand(std::get<CompactNode>(target->data));
+                target->data = expand(std::get<CompactNode>(target->data), true);
             }
 
             for (int i = 0; i < MAX_LEVEL; ++i) {
