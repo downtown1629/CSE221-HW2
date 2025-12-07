@@ -1,5 +1,5 @@
 extern "C" {
-#include "../librope/rope.h"
+#include "librope/rope.h"
 }
 
 #include <string>

@@ -7,11 +7,11 @@ CC_FLAGS     = -std=c99 -O3 -march=native
 SRC_DIR   = src
 MAIN_SRC  = $(SRC_DIR)/benchmark.cpp
 FUZZ_SRC  = $(SRC_DIR)/fuzzer.cpp
-LIBROPE_C = librope/rope.c
+LIBROPE_C = $(SRC_DIR)/librope/rope.c
 
 TARGET_MAIN   = main
 TARGET_FUZZER = fuzzer
-LIBROPE_O     = librope/rope.o
+LIBROPE_O     = $(SRC_DIR)/librope/rope.o
 
 # Default to including librope
 USE_LIBROPE ?= yes
@@ -47,8 +47,7 @@ $(TARGET_FUZZER): $(FUZZ_SRC)
 	$(CXX) $(FUZZER_FLAGS) -o $@ $<
 
 # Rule to build the librope object file
-$(LIBROPE_O): $(LIBROPE_C) librope/rope.h
-	@echo "Compiling C object '$@'..."
+$(LIBROPE_O): $(LIBROPE_C) $(SRC_DIR)/librope/rope.h
 	$(CC) $(CC_FLAGS) -c $< -o $@
 
 # Rule to run the benchmark
