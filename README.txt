@@ -23,17 +23,16 @@ Through this dynamic reconfiguration, the Bi-Modal Skip List provides balanced, 
 
 /
 ├── src/
-│   ├── BiModalSkipList.hpp  # Core implementation of the Bi-Modal Skip List.
-│   ├── Nodes.hpp            # Struct definitions for Node, GapNode, and CompactNode.
-│   ├── Baselines.hpp        # Implementations of baseline data structures (Gap Buffer, Piece Table).
-│   ├── benchmark.cpp        # The main benchmark program to measure and compare performance.
-│   ├── fuzzer.cpp           # Fuzzing and correctness verification program against std::string.
-│   └── librope_wrapper.cpp  # C++ wrapper for the `librope` C library for benchmarking.
-├── librope/
-│   └── (source files)       # Source code for the third-party `librope` C library, used as a baseline.
-├── report.pdf               # Final project report detailing the design, analysis, and results.
-├── Makefile                 # Build script for compiling all executables.
-└── README.txt               # This file.
+│   ├── BiModalSkipList.hpp     # Core implementation of the Bi-Modal Skip List.
+│   ├── Nodes.hpp               # Struct definitions for Node, GapNode, and CompactNode.
+│   ├── Baselines.hpp           # Implementations of baseline data structures (Gap Buffer, Piece Table).
+│   ├── benchmark.cpp           # The main benchmark program to measure and compare performance.
+│   ├── fuzzer.cpp              # Fuzzing and correctness verification program against std::string.
+│   ├── librope_wrapper.cpp     # C++ wrapper for the `librope` C library for benchmarking.
+│   └── librope/ (source files) # Source code for the third-party `librope` C library, used as a baseline.
+├── report.pdf                  # Final project report detailing the design, analysis, and results.
+├── Makefile                    # Build script for compiling all executables.
+└── README.txt                  # This file.
 
 3. Compilation and Execution
 
