@@ -138,8 +138,9 @@ Bi-Modal Skip List의 노드는 런타임 다형성(Polymorphism)을 가지지�
 본 연구의 객관적인 성능 평가를 위해, 텍스트 편집기 구현에 널리 사용되는 대표적인 자료구조들을 대조군(Baseline)으로 선정하여 비교 분석하였다. `SimpleGapBuffer`와 `NaivePieceTable`은 직접 구현하였으며, `GNU Rope`와 `librope`는 벤치마크를 위해 외부 코드를 통합하였다.
 
 *   **`std::vector`**: 메모리 연속성이 완벽하여 **이상적인 순차 읽기 속도(Theoretical Read Limit)**의 기준점으로 사용된다.
+*   **`std::string`**: C++ 표준 라이브러리의 문자열 구현체로, `std::vector`와 마찬가지로 내부적으로 연속된 메모리를 사용한다. 대부분의 시스템에서 작은 문자열에 대한 최적화(SSO, Small String Optimization)가 적용되어 있지만, 본 벤치마크의 대용량 데이터에서는 `std::vector<char>`와 거의 유사한 성능 특성을 보인다. 이는 O(N) 복잡도의 중간 삽입/삭제 성능과 O(1)의 순차 접근 성능을 갖는 기본적인 비교 기준선(baseline) 역할을 한다.
 *   **`SimpleGapBuffer`**: 커서 주변의 지역적 편집 성능은 우수하나, 커서가 멀리 이동할 때 발생하는 $O(N)$의 `move_gap` 비용의 한계를 명확히 보여준다.
-*   **`NaivePieceTable`**: VS Code 등 현대적인 에디터의 표준 방식으로, 쓰기 성능은 우수하지만 편집이 누적될수록 메타데이터가 복잡해지고 메모리 파편화로 인해 순차 읽기 성능이 저하되는 단점을 보여주는 중요한 비교 대상이다.
+*   **`NaivePieceTable`**: VS Code 등 현대적인 에디터의 표준 방식으로, 불변(immutable) 데이터 블록을 참조하여 쓰기 성능이 우수하다. 본 프로젝트에서 구현한 `NaivePieceTable`은 `std::list`를 사용하여 Piece 조각들을 관리한다. 이로 인해 특정 위치를 찾는 탐색 연산이 리스트를 선형 순회해야 하는 O(N) 복잡도를 가진다. 반면, VS Code와 같은 실제 에디터들은 Piece들을 **균형 이진 탐색 트리(예: Red-Black Tree)**로 관리하여 O(log N) 시간 복잡도로 탐색을 수행한다. 따라서 본 벤치마크의 `NaivePieceTable`은 개념 증명을 위한 단순화된 버전이며, 특히 무작위 편집 시나리오에서 상용 에디터의 Piece Table보다 낮은 성능을 보이는 것은 이러한 구조적 차이 때문이다.
 *   **`GNU Rope`**: Standard C++ 라이브러리의 일부로 제공되는 GNU 확장 구현체(`__gnu_cxx::crope`)이다. B-Tree를 기반으로 하는 고성능 문자열 자료구조로, 본 벤치마크에서는 외부 코드로 포함하여 비교 분석하였다.
 *   **`librope`**: Skip List를 기반으로 한 서드파티 C 구현체(`https://github.com/josephg/librope`)이다. `Bi-Modal Skip List`와 구조적으로 가장 유사하여 주요 비교 대상으로 삼았으며, 벤치마크를 위해 외부 소스 코드를 가져와 통합했다.
 
